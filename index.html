@@ -2096,10 +2096,19 @@ async function _loadUserFromToken(token){
 
 async function initWeComSSO(){
   if(!WECOM_SSO.enabled){
-    // 演示模式：加载数据库后用默认用户
     _authShowLoading('正在加载数据...');
-    await initDB();
-    _authHide();
+    try{
+      // 10秒超时保护：超时后跳过DB直接用本地数据
+      await Promise.race([
+        initDB(),
+        new Promise((_,rej)=>setTimeout(()=>rej(new Error('连接超时，使用本地数据')),10000))
+      ]);
+    }catch(e){
+      console.warn('DB load:', e.message);
+      showToast(e.message,'error');
+    }finally{
+      _authHide(); // 无论成功失败都关掉loading
+    }
     logAction('login',`用户「${currentUser.name}」登录系统`);
     applyPermissionsToUI();
     return;
