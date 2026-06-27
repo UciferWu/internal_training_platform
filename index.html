@@ -20,6 +20,13 @@
 }
 html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;font-size:14px;color:var(--text);background:var(--bg);}
 .app{display:flex;flex-direction:column;height:100vh;}
+/* ── Loading Overlay ── */
+#loading-overlay{position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;transition:opacity .3s;}
+#loading-overlay.hidden{opacity:0;pointer-events:none;}
+.loading-spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:ld-spin .7s linear infinite;}
+@keyframes ld-spin{to{transform:rotate(360deg)}}
+/* ── Competitor marker ── */
+.comp-marker-wrap{display:flex;align-items:center;justify-content:center;}
 
 /* ── Topbar ── */
 .topbar{display:flex;align-items:center;height:52px;padding:0 20px;background:var(--primary);color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.18);flex-shrink:0;z-index:200;}
@@ -459,6 +466,10 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
 </style>
 </head>
 <body>
+<div id="loading-overlay">
+  <div class="loading-spinner"></div>
+  <div style="font-size:13px;color:var(--text-secondary)">正在加载数据…</div>
+</div>
 <div class="app">
 
 <!-- ── Topbar ── -->
@@ -598,6 +609,7 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
       <div id="modal-tab-bar" class="modal-tab-bar">
         <button class="modal-tab active" id="modal-tab-proj" onclick="switchModalTab('proj')">🏢 新建项目</button>
         <button class="modal-tab" id="modal-tab-fac" onclick="switchModalTab('fac')">🔧 新建设施</button>
+        <button class="modal-tab" id="modal-tab-comp" onclick="switchModalTab('comp')">🏁 新建竞争对手</button>
       </div>
       <span class="modal-title-edit" id="modal-title-edit" style="display:none"></span>
       <button class="modal-close" onclick="closeModal()" style="margin-bottom:12px">
@@ -745,6 +757,50 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
         </button>
       </div>
     </div><!-- #modal-fac-form -->
+
+    <!-- ══ 新建竞争对手设施表单 ══ -->
+    <div id="modal-comp-form" style="display:none">
+      <div class="modal-sec-hd">竞争对手设施信息</div>
+      <div class="form-group">
+        <label class="form-label">设施名称<span class="req">*</span></label>
+        <input class="form-input" type="text" id="comp-name" placeholder="例：竞争对手营地 B">
+      </div>
+      <div class="form-row-2">
+        <div class="form-group">
+          <label class="form-label">纬度<span class="req">*</span></label>
+          <input class="form-input" type="number" id="comp-lat" placeholder="39.9042" step="0.0001">
+        </div>
+        <div class="form-group">
+          <label class="form-label">经度<span class="req">*</span></label>
+          <input class="form-input" type="number" id="comp-lng" placeholder="116.4074" step="0.0001">
+        </div>
+      </div>
+      <div class="form-hint" style="margin-top:-6px;margin-bottom:12px">💡 在编辑模式下点击地图可自动填入坐标</div>
+      <div class="form-group">
+        <label class="form-label">设施描述</label>
+        <div class="quill-wrap"><div id="quill-editor-comp"></div></div>
+      </div>
+      <!-- 竞争对手设施图片 -->
+      <div class="modal-sec-hd" style="margin-top:18px">设施图片</div>
+      <div id="comp-img-grid" class="form-img-grid"></div>
+      <div style="margin-top:8px">
+        <input type="file" id="comp-img-file-input" accept="image/*" multiple style="display:none" onchange="handleCompImgUpload(event)">
+        <button class="btn btn-sm" onclick="document.getElementById('comp-img-file-input').click()">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+          上传图片
+        </button>
+      </div>
+      <!-- 竞争对手设施资料 -->
+      <div class="modal-sec-hd" style="margin-top:18px">设施资料</div>
+      <div id="comp-mat-list" class="form-mat-list"></div>
+      <div style="margin-top:8px">
+        <input type="file" id="comp-mat-file-input" multiple style="display:none" onchange="handleCompMatUpload(event)">
+        <button class="btn btn-sm" onclick="document.getElementById('comp-mat-file-input').click()">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+          上传资料
+        </button>
+      </div>
+    </div><!-- #modal-comp-form -->
 
     </div><!-- .proj-modal-scroll -->
     <div class="proj-modal-foot modal-footer">
@@ -1040,6 +1096,10 @@ const db = {
   // create table if not exists facilities (id int primary key, project_id int, name text, lat float, lng float, descr text, images jsonb default '[]', materials jsonb default '[]');
   async saveFacility(f)   { const {error}=await _sb.from('facilities').upsert({id:f.id,project_id:f.projectId,name:f.name,lat:f.lat,lng:f.lng,descr:f.desc||'',images:JSON.stringify(f.images||[]),materials:JSON.stringify(f.materials||[])});if(error)throw error; },
   async deleteFacility(id){ const {error}=await _sb.from('facilities').delete().eq('id',id);if(error)throw error; },
+  // 竞争对手设施持久化（需先在 Supabase SQL 编辑器中运行）：
+  // create table if not exists competitors (id int primary key, name text, lat float, lng float, descr text, images jsonb default '[]', materials jsonb default '[]');
+  async saveCompetitor(c)  { const {error}=await _sb.from('competitors').upsert({id:c.id,name:c.name,lat:c.lat,lng:c.lng,descr:c.desc||'',images:JSON.stringify(c.images||[]),materials:JSON.stringify(c.materials||[])});if(error)throw error; },
+  async deleteCompetitor(id){ const {error}=await _sb.from('competitors').delete().eq('id',id);if(error)throw error; },
   // 几内亚培训资料持久化（需先在 Supabase SQL 编辑器中运行）：
   // create table if not exists arch_categories (id int primary key, name text, color text, sort_order int default 0);
   // create table if not exists arch_files (id int primary key, cat_id int, name text, ext text, size text, date text, data_url text);
@@ -1344,9 +1404,14 @@ let map,streetLayer,satelliteLayer,hybridLabelLayer;
 let currentLayer='street',markerLayer={},facilityMarkerLayer={};
 let editMode=false,activeProjectId=null,activeFacilityId=null,editingId=null,editingFacilityId=null,pendingDeleteId=null;
 let FACILITIES=[],facilityIdSeq=2000;
+let COMPETITORS=[],competitorIdSeq=3000;
+let competitorMarkerLayer={};
 let modalTab='proj';
 // Facility form state
 let facImages=[],facMaterials=[],facImgSeq=0,facMatSeq=0;
+// Competitor form state
+let compImages=[],compMaterials=[],compImgSeq=0,compMatSeq=0;
+let editingCompetitorId=null;
 // Detail panel materials rename/drag state
 let _detailMatRenamingIdx=null,_detailMatDragIdx=null;
 const TYPE_ICON={video:'🎬',doc:'📄',img:'🖼️'};
@@ -1358,6 +1423,18 @@ function makeMarkerIcon(color,s=28){
 function makeFacilityIcon(s=26){
   return L.divIcon({className:'',html:`<div style="width:${s}px;height:${s}px;background:#7B5EA7;border-radius:6px;border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.22);display:flex;align-items:center;justify-content:center;font-size:13px;line-height:1">⚙</div>`,iconSize:[s,s],iconAnchor:[s/2,s/2]});
 }
+function makeCompetitorIcon(s=26){
+  // Red diamond shape
+  return L.divIcon({className:'',html:`<div style="width:${s}px;height:${s}px;background:#C0392B;transform:rotate(45deg);border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.22);display:flex;align-items:center;justify-content:center"><span style="transform:rotate(-45deg);font-size:11px;line-height:1">🏁</span></div>`,iconSize:[s,s],iconAnchor:[s/2,s/2]});
+}
+function addCompetitorMarker(c){
+  const m=L.marker([c.lat,c.lng],{icon:makeCompetitorIcon()}).addTo(map);
+  m.bindTooltip(c.name,{permanent:false,direction:'top',offset:[0,-14]});
+  m.on('click',e=>{L.DomEvent.stopPropagation(e);openCompetitorDetail(c.id);});
+  competitorMarkerLayer[c.id]=m;
+}
+function removeCompetitorMarker(id){if(competitorMarkerLayer[id]){map.removeLayer(competitorMarkerLayer[id]);delete competitorMarkerLayer[id];}}
+function refreshCompetitorMarker(c){removeCompetitorMarker(c.id);addCompetitorMarker(c);}
 function addFacilityMarker(f){
   const proj=PROJECTS.find(p=>p.id===f.projectId);
   const m=L.marker([f.lat,f.lng],{icon:makeFacilityIcon()}).addTo(map);
@@ -1526,6 +1603,7 @@ function closeDetail(){
   document.getElementById('detail-content').style.display='none';
   Object.values(markerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='1';});
   Object.values(facilityMarkerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='1';});
+  Object.values(competitorMarkerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='1';});
   activeProjectId=null;activeFacilityId=null;_detailMatRenamingIdx=null;
 }
 
@@ -1713,7 +1791,7 @@ function matDrop(ev,id){
 //  Modal Open / Close
 // ══════════════════════════════════════════════════════
 function openAddModal(lat,lng){
-  editingId=null;editingFacilityId=null;
+  editingId=null;editingFacilityId=null;editingCompetitorId=null;
   // Show tabs (create mode)
   document.getElementById('modal-tab-bar').style.display='flex';
   document.getElementById('modal-title-edit').style.display='none';
@@ -1739,6 +1817,13 @@ function openAddModal(lat,lng){
   if(qEditors['fac'])qEditors['fac'].setContents([]);
   facImages=[];facMaterials=[];facImgSeq=0;facMatSeq=0;
   renderFacImgGrid();renderFacMatList();
+  // Reset competitor form
+  document.getElementById('comp-name').value='';
+  document.getElementById('comp-lat').value=lat!=null?lat.toFixed(4):'';
+  document.getElementById('comp-lng').value=lng!=null?lng.toFixed(4):'';
+  if(qEditors['comp'])qEditors['comp'].setContents([]);
+  compImages=[];compMaterials=[];compImgSeq=0;compMatSeq=0;
+  renderCompImgGrid();renderCompMatList();
   clearInvalid();
   document.getElementById('proj-modal').classList.add('open');
   setTimeout(()=>document.getElementById('f-name-zh').focus(),80);
@@ -1752,6 +1837,7 @@ function openEditModal(id){
   document.getElementById('modal-title-edit').textContent='编辑业务项目';
   document.getElementById('modal-proj-form').style.display='';
   document.getElementById('modal-fac-form').style.display='none';
+  document.getElementById('modal-comp-form').style.display='none';
   modalTab='proj';
   document.getElementById('modal-save-label').textContent='更新项目';
   document.getElementById('f-name-zh').value=pName(p);
@@ -1777,16 +1863,23 @@ function switchModalTab(tab){
   modalTab=tab;
   document.getElementById('modal-tab-proj').classList.toggle('active',tab==='proj');
   document.getElementById('modal-tab-fac').classList.toggle('active',tab==='fac');
+  document.getElementById('modal-tab-comp').classList.toggle('active',tab==='comp');
   document.getElementById('modal-proj-form').style.display=tab==='proj'?'':'none';
   document.getElementById('modal-fac-form').style.display=tab==='fac'?'':'none';
-  document.getElementById('modal-save-label').textContent=tab==='proj'?'保存项目':'保存设施';
+  document.getElementById('modal-comp-form').style.display=tab==='comp'?'':'none';
+  document.getElementById('modal-save-label').textContent=tab==='proj'?'保存项目':tab==='fac'?'保存设施':'保存竞争对手';
   if(tab==='fac'&&!qEditors['fac']){
     const toolbar=[[{header:[1,2,false]}],['bold','italic','underline'],[{'list':'ordered'},{'list':'bullet'}],['clean']];
     qEditors['fac']=new Quill('#quill-editor-fac',{theme:'snow',modules:{toolbar},placeholder:'输入设施描述、功能说明等…'});
   }
+  if(tab==='comp'&&!qEditors['comp']){
+    const toolbar=[[{header:[1,2,false]}],['bold','italic','underline'],[{'list':'ordered'},{'list':'bullet'}],['clean']];
+    qEditors['comp']=new Quill('#quill-editor-comp',{theme:'snow',modules:{toolbar},placeholder:'输入竞争对手设施描述…'});
+  }
 }
 function saveModalEntry(){
   if(modalTab==='fac')saveFacility();
+  else if(modalTab==='comp')saveCompetitor();
   else saveProject();
 }
 
@@ -1879,12 +1972,13 @@ function saveFacility(){
 // ── Facility: open edit modal ──
 function openEditFacilityModal(id){
   const f=FACILITIES.find(x=>x.id===id);if(!f)return;
-  editingFacilityId=id;editingId=null;
+  editingFacilityId=id;editingId=null;editingCompetitorId=null;
   document.getElementById('modal-tab-bar').style.display='none';
   document.getElementById('modal-title-edit').style.display='';
   document.getElementById('modal-title-edit').textContent='编辑设施';
   document.getElementById('modal-proj-form').style.display='none';
   document.getElementById('modal-fac-form').style.display='';
+  document.getElementById('modal-comp-form').style.display='none';
   modalTab='fac';
   _populateFacilityProjectSelect();
   document.getElementById('fac-project-id').value=f.projectId;
@@ -1950,6 +2044,126 @@ function confirmDeleteFacility(id){
     closeDetail();showToast('设施已删除','info');
   });
 }
+// ══════════════════════════════════════════════════════
+//  Competitor Facility
+// ══════════════════════════════════════════════════════
+let _compImgDragId=null;
+async function handleCompImgUpload(ev){
+  const files=Array.from(ev.target.files||[]);ev.target.value='';
+  for(const file of files){
+    try{const r=await resizeImageToMax(file,1600,1600);const id=++compImgSeq;compImages.push({id,name:file.name,size:fmtSize(file.size),dataUrl:r.dataUrl});}catch(e){}
+  }renderCompImgGrid();
+}
+function renderCompImgGrid(){
+  const el=document.getElementById('comp-img-grid');if(!el)return;
+  if(!compImages.length){el.innerHTML='<span class="form-empty-hint">暂无图片</span>';return;}
+  el.innerHTML=compImages.map((img,i)=>`<div class="form-img-item" draggable="true" ondragstart="_compImgDragId=${img.id};event.dataTransfer.effectAllowed='move'" ondragend="_compImgDragId=null" ondragover="event.preventDefault()" ondrop="compImgDrop(event,${img.id})"><img src="${img.dataUrl}" onclick="openPreview({name:img.name,ext:'jpg',size:img.size,date:'',dataUrl:img.dataUrl})"><button class="form-img-del" onclick="compImages=compImages.filter(x=>x.id!==${img.id});renderCompImgGrid()">×</button></div>`).join('');
+}
+function compImgDrop(ev,toId){ev.preventDefault();const fi=compImages.findIndex(x=>x.id===_compImgDragId),ti=compImages.findIndex(x=>x.id===toId);if(fi<0||ti<0)return;const[a]=compImages.splice(fi,1);compImages.splice(ti,0,a);renderCompImgGrid();}
+async function handleCompMatUpload(ev){
+  const files=Array.from(ev.target.files||[]);ev.target.value='';
+  for(const file of files){
+    const parts=file.name.split('.');const ext=parts.length>1?parts[parts.length-1].toLowerCase():'';
+    let dataUrl='';if(file.size<50*1024*1024){try{dataUrl=await new Promise(res=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=()=>res('');r.readAsDataURL(file);});}catch(e){}}
+    compMaterials.push({id:++compMatSeq,name:file.name,ext,size:fmtSize(file.size),dataUrl});
+  }renderCompMatList();
+}
+function renderCompMatList(){
+  const el=document.getElementById('comp-mat-list');if(!el)return;
+  if(!compMaterials.length){el.innerHTML='<span class="form-empty-hint">暂无资料</span>';return;}
+  el.innerHTML=compMaterials.map((f,idx)=>`<div class="form-mat-item"><span class="drag-handle">⠿</span><div class="form-mat-icon" style="background:${fileBg(f.ext)}">${fileIcon(f.ext)}</div><div class="form-mat-info"><div class="form-mat-name">${escHtml(f.name)}</div><div class="form-mat-meta">${escHtml(f.ext.toUpperCase())} · ${escHtml(f.size)}</div></div><div class="form-mat-acts"><button class="arch-file-act" onclick="openPreviewInCtx('compForm',${idx})">查看</button><button class="arch-file-act del" onclick="compMaterials=compMaterials.filter(x=>x.id!==${f.id});renderCompMatList()">删除</button></div></div>`).join('');
+}
+function saveCompetitor(){
+  const name=(document.getElementById('comp-name').value||'').trim();
+  const lat=parseFloat(document.getElementById('comp-lat').value);
+  const lng=parseFloat(document.getElementById('comp-lng').value);
+  const desc=(qEditors['comp']&&qEditors['comp'].getText().trim())?qEditors['comp'].root.innerHTML:'';
+  let valid=true;clearInvalid();
+  if(!name){document.getElementById('comp-name').classList.add('invalid');valid=false;}
+  if(isNaN(lat)||lat<-90||lat>90){document.getElementById('comp-lat').classList.add('invalid');valid=false;}
+  if(isNaN(lng)||lng<-180||lng>180){document.getElementById('comp-lng').classList.add('invalid');valid=false;}
+  if(!valid){showToast('请检查必填项','error');return;}
+  if(editingCompetitorId!==null){
+    const c=COMPETITORS.find(x=>x.id===editingCompetitorId);
+    if(c){Object.assign(c,{name,lat,lng,desc,images:[...compImages],materials:[...compMaterials]});
+      logAction('edit',`修改竞争对手「${name}」`);dbSave(db.saveCompetitor(c));
+      refreshCompetitorMarker(c);closeModal();openCompetitorDetail(c.id);showToast('竞争对手设施已更新：'+name,'success');}
+  }else{
+    const newC={id:++competitorIdSeq,name,lat,lng,desc,images:[...compImages],materials:[...compMaterials]};
+    COMPETITORS.push(newC);
+    logAction('create',`新建竞争对手「${name}」`);dbSave(db.saveCompetitor(newC));
+    addCompetitorMarker(newC);closeModal();openCompetitorDetail(newC.id);showToast('竞争对手设施已创建：'+name,'success');
+  }
+}
+function openEditCompetitorModal(id){
+  const c=COMPETITORS.find(x=>x.id===id);if(!c)return;
+  editingCompetitorId=id;editingId=null;editingFacilityId=null;
+  document.getElementById('modal-tab-bar').style.display='none';
+  document.getElementById('modal-title-edit').style.display='';
+  document.getElementById('modal-title-edit').textContent='编辑竞争对手设施';
+  document.getElementById('modal-proj-form').style.display='none';
+  document.getElementById('modal-fac-form').style.display='none';
+  document.getElementById('modal-comp-form').style.display='';
+  modalTab='comp';
+  document.getElementById('comp-name').value=c.name;
+  document.getElementById('comp-lat').value=c.lat;
+  document.getElementById('comp-lng').value=c.lng;
+  if(!qEditors['comp']){
+    const toolbar=[[{header:[1,2,false]}],['bold','italic','underline'],[{'list':'ordered'},{'list':'bullet'}],['clean']];
+    qEditors['comp']=new Quill('#quill-editor-comp',{theme:'snow',modules:{toolbar},placeholder:'输入竞争对手设施描述…'});
+  }
+  if(qEditors['comp'])qEditors['comp'].clipboard.dangerouslyPasteHTML(c.desc||'');
+  compImages=(c.images||[]).map(img=>({...img,id:++compImgSeq}));
+  compMaterials=(c.materials||[]).map(m=>({...m,id:++compMatSeq}));
+  renderCompImgGrid();renderCompMatList();
+  document.getElementById('modal-save-label').textContent='更新竞争对手';
+  clearInvalid();
+  document.getElementById('proj-modal').classList.add('open');
+  setTimeout(()=>document.getElementById('comp-name').focus(),80);
+}
+function openCompetitorDetail(id){
+  const c=COMPETITORS.find(x=>x.id===id);if(!c)return;
+  activeProjectId=null;activeFacilityId=null;
+  logAction('view',`查看竞争对手「${c.name}」`);
+  document.getElementById('detail-panel').classList.remove('hidden');
+  document.getElementById('detail-empty').style.display='none';
+  const dc=document.getElementById('detail-content');dc.style.display='flex';
+  window._detailCtx=(c.materials||[]).map(m=>({name:m.name,ext:m.ext,size:m.size,date:'',dataUrl:m.dataUrl||''}));
+  window._detailImgCtx=(c.images||[]).map(img=>({name:img.name,ext:'jpg',size:img.size,date:'',dataUrl:img.dataUrl||''}));
+  const matsHtml=(c.materials&&c.materials.length)?c.materials.map((m,mi)=>`<div class="content-item" onclick="openPreviewInCtx('detail',${mi})"><div class="content-icon icon-doc" style="background:${fileBg(m.ext)}">${fileIcon(m.ext)}</div><div style="min-width:0"><div class="content-item-title">${escHtml(m.name)}</div><div class="content-item-meta">${escHtml(m.ext.toUpperCase()+' · '+m.size)}</div></div></div>`).join(''):`<p style="font-size:13px;color:#B4B2A9;padding:4px 0">暂无资料</p>`;
+  const imgSection=(c.images&&c.images.length)?`<div class="section"><div class="section-title">设施图片 (${c.images.length})</div><div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:4px">${c.images.map((img,ii)=>`<div style="width:70px;height:70px;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--border);cursor:pointer;flex-shrink:0" onclick="openPreviewInCtx('detailImg',${ii})"><img src="${img.dataUrl||''}" style="width:100%;height:100%;object-fit:cover;display:block"></div>`).join('')}</div></div>`:'';
+  const editBtns=(editMode&&can('editProject'))?`<div class="detail-actions"><button class="btn btn-sm" onclick="openEditCompetitorModal(${c.id})"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>编辑</button><button class="btn btn-sm btn-danger" onclick="confirmDeleteCompetitor(${c.id})"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>删除</button></div>`:'';
+  dc.innerHTML=`
+  <div class="detail-header">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+      <div class="detail-project-name" style="color:#C0392B">🏁 ${escHtml(c.name)}</div>
+      <button style="background:none;border:none;cursor:pointer;color:#B4B2A9;flex-shrink:0;margin-top:2px" onclick="closeDetail()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div style="margin-top:4px;font-size:12px;color:var(--text-tertiary)">竞争对手设施</div>
+    ${editBtns}
+  </div>
+  <div class="section">
+    <div class="section-title">基本信息</div>
+    <div class="info-grid"><div class="info-item"><label>坐标</label><span>${c.lat.toFixed(4)}, ${c.lng.toFixed(4)}</span></div></div>
+    ${c.desc?`<div class="desc-html" style="margin-top:10px">${c.desc}</div>`:''}
+  </div>
+  <div class="section" style="flex:1"><div class="section-title">资料 (${(c.materials||[]).length})</div><div class="content-list">${matsHtml}</div></div>
+  ${imgSection}`;
+  Object.values(markerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='.5';});
+  Object.values(facilityMarkerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='.5';});
+  Object.values(competitorMarkerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='.5';});
+  if(competitorMarkerLayer[id]){competitorMarkerLayer[id].getElement().style.opacity='1';map.panTo([c.lat,c.lng],{animate:true,duration:.4});}
+}
+function confirmDeleteCompetitor(id){
+  const c=COMPETITORS.find(x=>x.id===id);if(!c)return;
+  showConfirm('删除竞争对手',`删除「${c.name}」？此操作不可撤销。`,()=>{
+    logAction('delete',`删除竞争对手「${c.name}」`);
+    dbSave(db.deleteCompetitor(id));
+    removeCompetitorMarker(id);COMPETITORS=COMPETITORS.filter(x=>x.id!==id);
+    closeDetail();showToast('竞争对手设施已删除','info');
+  });
+}
+
 function clearInvalid(){document.querySelectorAll('.form-input,.form-select').forEach(el=>el.classList.remove('invalid'));}
 
 function saveProject(){
@@ -2036,8 +2250,10 @@ let _prevCol=[], _prevIdx=0;
 
 // Open via a named context key (set by renderFormImgGrid etc.)
 function openPreviewInCtx(ctxKey, idx){
+  window._compFormCtx=compMaterials.map(m=>({name:m.name,ext:m.ext,size:m.size,date:'',dataUrl:m.dataUrl||''}));
   const ctxMap={img:window._imgCtx,mat:window._matCtx,arch:window._archCtx,
-                detail:window._detailCtx,detailImg:window._detailImgCtx};
+                detail:window._detailCtx,detailImg:window._detailImgCtx,
+                facForm:window._facFormCtx,compForm:window._compFormCtx};
   const col=ctxMap[ctxKey]||[];
   if(!col[idx])return;
   _prevCol=col; _prevIdx=idx;
@@ -2667,10 +2883,23 @@ async function initDB(){
         await Promise.all(FILES.map(f=>_sb.from('arch_files').upsert({id:f.id,cat_id:f.catId,name:f.name,ext:f.ext,size:f.size,date:f.date,data_url:''})));
       }
     }catch(e){console.warn('arch_files 表不存在，使用本地数据（请在 Supabase 中创建表）');}
+
+    // ── Competitors（竞争对手设施） ──
+    try{
+      const {data:compRows,error:ce}=await _sb.from('competitors').select('*');
+      if(!ce&&compRows&&compRows.length){
+        COMPETITORS=compRows.map(r=>({id:r.id,name:r.name,lat:r.lat,lng:r.lng,desc:r.descr||'',images:typeof r.images==='string'?JSON.parse(r.images):r.images||[],materials:typeof r.materials==='string'?JSON.parse(r.materials):r.materials||[]}));
+        competitorIdSeq=Math.max(...compRows.map(c=>c.id),competitorIdSeq);
+        COMPETITORS.forEach(c=>addCompetitorMarker(c));
+      }
+    }catch(e){console.warn('competitors 表不存在，使用本地数据（可在 Supabase 中创建表）');}
   }catch(e){
     console.error('DB init error:',e);
     showToast('数据库连接失败，使用本地数据','error');
   }
+  // 隐藏加载遮罩，刷新当前视图
+  const ov=document.getElementById('loading-overlay');if(ov)ov.classList.add('hidden');
+  switchView(currentView);
 }
 
 // ══════════════════════════════════════════════════════
@@ -2714,10 +2943,12 @@ async function _loadUserFromToken(token){
 
 async function initWeComSSO(){
   if(!WECOM_SSO.enabled){
-    // 立即显示应用，后台静默加载数据库（不阻塞界面）
     logAction('login',`用户「${currentUser.name}」登录系统`);
+    try{ await initDB(); }catch(e){ console.warn('DB加载失败:',e.message);
+      const ov=document.getElementById('loading-overlay');if(ov)ov.classList.add('hidden');
+      switchView(currentView);
+    }
     applyPermissionsToUI();
-    initDB().catch(e=>console.warn('DB后台加载失败:',e.message));
     return;
   }
 
