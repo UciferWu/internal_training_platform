@@ -385,7 +385,9 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
 .fr-word-sidebar-item:hover{background:var(--primary-light);}
 .fr-word-sidebar-item.active{background:var(--primary-light);border-left-color:var(--primary);}
 .fr-word-sidebar-num{font-size:10px;color:var(--text-tertiary);min-width:18px;flex-shrink:0;}
-.fr-word-sidebar-fr{font-weight:600;font-size:12px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.fr-word-sidebar-fr-wrap{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;}
+.fr-word-sidebar-fr{font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.fr-word-sidebar-zh{font-size:11px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .fr-word-sidebar-done{color:var(--green);font-size:10px;flex-shrink:0;}
 .fr-learn-main{flex:1;overflow-y:auto;display:flex;flex-direction:column;align-items:center;padding:20px 20px 40px;gap:20px;min-height:0;}
 .fr-shuffle-btn.active{background:var(--primary-light);color:var(--primary);border-color:var(--primary);}
@@ -545,6 +547,7 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
     <div class="legend-row"><div class="legend-dot" style="background:#5F5E5A"></div>完成结束</div>
     <div class="legend-row"><div class="legend-dot" style="background:#A32D2D"></div>取消</div>
     <div class="legend-row" style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px"><div class="legend-dot" style="background:#7B5EA7;border-radius:3px"></div>项目设施</div>
+    <div class="legend-row"><div style="width:10px;height:10px;background:#C0392B;transform:rotate(45deg);flex-shrink:0;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3)"></div>竞争对手设施</div>
   </div>
   <div class="detail-panel hidden" id="detail-panel">
     <div class="detail-empty" id="detail-empty">
@@ -1093,11 +1096,12 @@ const db = {
   async saveFrStats(uid,s)      { const {error}=await _sb.from('fr_stats').upsert({user_id:uid,points:s.points,streak:s.streak,last_check_in:s.lastCheckIn});if(error)throw error; },
   async insertLog(log)          { await _sb.from('logs').insert({user_id:log.userId,action:log.action,detail:log.detail,time:log.time,ip:log.ip}); },
   // 项目设施持久化（需先在 Supabase SQL 编辑器中运行）：
-  // create table if not exists facilities (id int primary key, project_id int, name text, lat float, lng float, descr text, images jsonb default '[]', materials jsonb default '[]');
+  // create table if not exists facilities (id bigint primary key, project_id int, name text, lat float, lng float, descr text, images jsonb default '[]', materials jsonb default '[]');
+  // 若已存在旧表（id 为 int），请执行：alter table facilities alter column id type bigint;
   async saveFacility(f)   { const {error}=await _sb.from('facilities').upsert({id:f.id,project_id:f.projectId,name:f.name,lat:f.lat,lng:f.lng,descr:f.desc||'',images:JSON.stringify(f.images||[]),materials:JSON.stringify(f.materials||[])});if(error)throw error; },
   async deleteFacility(id){ const {error}=await _sb.from('facilities').delete().eq('id',id);if(error)throw error; },
   // 竞争对手设施持久化（需先在 Supabase SQL 编辑器中运行）：
-  // create table if not exists competitors (id int primary key, name text, lat float, lng float, descr text, images jsonb default '[]', materials jsonb default '[]');
+  // create table if not exists competitors (id bigint primary key, name text, lat float, lng float, descr text, images jsonb default '[]', materials jsonb default '[]');
   async saveCompetitor(c)  { const {error}=await _sb.from('competitors').upsert({id:c.id,name:c.name,lat:c.lat,lng:c.lng,descr:c.desc||'',images:JSON.stringify(c.images||[]),materials:JSON.stringify(c.materials||[])});if(error)throw error; },
   async deleteCompetitor(id){ const {error}=await _sb.from('competitors').delete().eq('id',id);if(error)throw error; },
   // 几内亚培训资料持久化（需先在 Supabase SQL 编辑器中运行）：
@@ -2825,7 +2829,7 @@ async function initDB(){
     // ── FR Words ──
     const {data:wordRows}=await _sb.from('fr_words').select('*').order('id');
     if(wordRows&&wordRows.length){
-      FR_WORDS=wordRows.map(w=>({...w,catId:w.cat_id}));
+      FR_WORDS=wordRows.map(w=>({...w,catId:w.cat_id,zhApprox:w.zh_approx||''}));
       FR_WORD_SEQ=Math.max(...wordRows.map(w=>w.id),FR_WORD_SEQ);
     }else{
       await Promise.all(FR_WORDS.map(w=>_sb.from('fr_words').upsert({id:w.id,cat_id:w.catId,fr:w.fr,zh:w.zh,phonetic:w.phonetic,zh_approx:w.zhApprox,example:w.example})));
@@ -2856,8 +2860,10 @@ async function initDB(){
     try{
       const {data:facRows,error:fe}=await _sb.from('facilities').select('*');
       if(!fe&&facRows&&facRows.length){
-        FACILITIES=facRows.map(r=>({id:r.id,projectId:r.project_id,name:r.name,lat:r.lat,lng:r.lng,desc:r.descr||'',images:typeof r.images==='string'?JSON.parse(r.images):r.images||[],materials:typeof r.materials==='string'?JSON.parse(r.materials):r.materials||[]}));
-        facilityIdSeq=Math.max(...facRows.map(f=>f.id),facilityIdSeq);
+        FACILITIES=facRows.map(r=>({id:Number(r.id),projectId:r.project_id,name:r.name,lat:r.lat,lng:r.lng,desc:r.descr||'',images:typeof r.images==='string'?JSON.parse(r.images):r.images||[],materials:typeof r.materials==='string'?JSON.parse(r.materials):r.materials||[]}));
+        // 过滤掉时间戳级别的 ID（超出 PG integer 范围），只用合理范围的 ID 推算序列号
+        const safeIds=facRows.map(f=>Number(f.id)).filter(id=>id>0&&id<2_000_000_000);
+        facilityIdSeq=safeIds.length?Math.max(...safeIds,facilityIdSeq):facilityIdSeq;
         FACILITIES.forEach(f=>addFacilityMarker(f));
       }
     }catch(e){console.warn('facilities 表不存在，使用本地数据（可在 Supabase 中创建表）');}
@@ -2888,8 +2894,9 @@ async function initDB(){
     try{
       const {data:compRows,error:ce}=await _sb.from('competitors').select('*');
       if(!ce&&compRows&&compRows.length){
-        COMPETITORS=compRows.map(r=>({id:r.id,name:r.name,lat:r.lat,lng:r.lng,desc:r.descr||'',images:typeof r.images==='string'?JSON.parse(r.images):r.images||[],materials:typeof r.materials==='string'?JSON.parse(r.materials):r.materials||[]}));
-        competitorIdSeq=Math.max(...compRows.map(c=>c.id),competitorIdSeq);
+        COMPETITORS=compRows.map(r=>({id:Number(r.id),name:r.name,lat:r.lat,lng:r.lng,desc:r.descr||'',images:typeof r.images==='string'?JSON.parse(r.images):r.images||[],materials:typeof r.materials==='string'?JSON.parse(r.materials):r.materials||[]}));
+        const safeCompIds=compRows.map(c=>Number(c.id)).filter(id=>id>0&&id<2_000_000_000);
+        competitorIdSeq=safeCompIds.length?Math.max(...safeCompIds,competitorIdSeq):competitorIdSeq;
         COMPETITORS.forEach(c=>addCompetitorMarker(c));
       }
     }catch(e){console.warn('competitors 表不存在，使用本地数据（可在 Supabase 中创建表）');}
@@ -3345,7 +3352,10 @@ function frRenderWordSidebar(){
     const done=!!s.learned[w.id];
     return `<div class="fr-word-sidebar-item${i===frQueueIdx?' active':''}" onclick="frJumpToIdx(${i})">
       <span class="fr-word-sidebar-num">${i+1}</span>
-      <span class="fr-word-sidebar-fr">${escHtml(w.fr)}</span>
+      <span class="fr-word-sidebar-fr-wrap">
+        <span class="fr-word-sidebar-fr">${escHtml(w.fr)}</span>
+        ${w.zh?`<span class="fr-word-sidebar-zh">${escHtml(w.zh)}</span>`:''}
+      </span>
       ${done?'<span class="fr-word-sidebar-done">✓</span>':''}
     </div>`;
   }).join('');
