@@ -856,7 +856,7 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
   <!-- Home: stats strip + categories -->
   <div class="fr-tab" id="fr-tab-home">
     <div class="fr-stats-strip" id="fr-stats-strip"></div>
-    <div class="fr-section-title">选择学习类别</div>
+    <div class="fr-section-title">选择词库类别</div>
     <div class="fr-cat-grid" id="fr-cat-grid"></div>
   </div>
 
@@ -976,12 +976,13 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
       <div class="fr-cat-mgr-title">类别管理</div>
       <div class="fr-cat-list" id="fr-cat-list"></div>
       <div class="fr-cat-add-row">
-        <span id="fr-new-cat-icon-display" style="font-size:20px;cursor:pointer;padding:4px;border-radius:4px;border:1px solid var(--border)" onclick="frToggleIconPicker()" title="选择图标">🗣️</span>
-        <input class="form-input" id="fr-new-cat-name" placeholder="新类别名称" style="flex:1;min-width:120px"
+        <span id="fr-new-cat-icon-display" style="font-size:20px;cursor:pointer;padding:4px;border-radius:4px;border:1px solid var(--border);min-width:28px;display:inline-flex;align-items:center;justify-content:center" onclick="frToggleIconPicker()" title="选择图标">💬</span>
+        <input class="form-input" id="fr-new-cat-name" placeholder="新类别名称（自动匹配图标）" style="flex:1;min-width:120px"
+               oninput="frOnNewCatNameInput(this.value)"
                onkeydown="if(event.key==='Enter')frAddCategory()">
         <button class="btn btn-primary btn-sm" onclick="frAddCategory()">+ 添加类别</button>
       </div>
-      <div class="fr-icon-picker" id="fr-icon-picker" style="display:none"></div>
+      <div class="fr-icon-picker" id="fr-icon-picker" style="display:none;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);margin-top:4px;box-shadow:var(--shadow-sm)"></div>
     </div>
   </div>
 </div>
@@ -1744,7 +1745,7 @@ function openAddModal(lat,lng){
 }
 function openEditModal(id){
   const p=PROJECTS.find(x=>x.id===id);if(!p)return;
-  editingId=id;editingFacilityId=null;
+  editingId=id;editingFacilityId=null;modalTab='proj';
   // Hide tabs (edit mode)
   document.getElementById('modal-tab-bar').style.display='none';
   document.getElementById('modal-title-edit').style.display='';
@@ -1785,8 +1786,8 @@ function switchModalTab(tab){
   }
 }
 function saveModalEntry(){
-  if(modalTab==='proj'||editingId!==null)saveProject();
-  else saveFacility();
+  if(modalTab==='fac')saveFacility();
+  else saveProject();
 }
 
 // ── Facility: populate project select ──
@@ -2802,15 +2803,17 @@ function wecomLogout(){
 //  French Training — Data
 // ══════════════════════════════════════════════════════
 let FR_CAT_SEQ=5;
-const FR_CAT_ICONS=['🗣️','⛏️','🚂','🏠','🔧','📋','🌿','🚗','💼','🏗️'];
+const FR_CAT_ICONS=['💬','🗣️','⛏️','🪨','🚂','🛤️','🏗️','🔧','🔩','🏠','🛒','🌿','🚗','💼','📋','🌍','🦺','🌾','🏥','🎓','🔬','🏭','⚡','🛠️','📡','🚧','🪝','🧱','🛢️','💧'];
+const FR_CAT_KEYWORDS={'矿':['⛏️','🪨'],'铁路':['🛤️','🚂'],'火车':['🚂','🛤️'],'生活':['🛒','🏠'],'工程':['🏗️','🔧'],'技术':['🔬','🔧'],'通用':['💬','🗣️'],'语言':['💬','🗣️'],'安全':['🦺','🚧'],'建筑':['🏗️','🧱'],'自然':['🌿','🌍'],'交通':['🚗','🚂'],'医':['🏥'],'农':['🌾'],'电':['⚡','📡'],'设备':['🛠️','🔩'],'管理':['💼','📋'],'通信':['📡','💬'],'道路':['🚧','🛤️']};
 const FR_CAT_COLORS=['#1270AB','#BA7517','#1D9E75','#7B5EA7','#A32D2D','#0A5382','#2D6A4F','#6B3D26','#4A4A8A','#2C6E49'];
 let FR_CATEGORIES=[
-  {id:1,name:'通用类',icon:'🗣️',color:'#1270AB'},
+  {id:1,name:'通用类',icon:'💬',color:'#1270AB'},
   {id:2,name:'矿业类',icon:'⛏️',color:'#BA7517'},
-  {id:3,name:'铁路类',icon:'🚂',color:'#1D9E75'},
-  {id:4,name:'日常生活',icon:'🏠',color:'#7B5EA7'},
-  {id:5,name:'工程技术',icon:'🔧',color:'#A32D2D'},
+  {id:3,name:'铁路类',icon:'🛤️',color:'#1D9E75'},
+  {id:4,name:'日常生活',icon:'🛒',color:'#7B5EA7'},
+  {id:5,name:'工程技术',icon:'🏗️',color:'#A32D2D'},
 ];
+let _frEditingCatIconId=null;
 let FR_WORD_SEQ=50;
 let FR_WORDS=[
   // 通用类
@@ -2885,7 +2888,7 @@ let frSessionTotal=0;
 let frCardFlipped=false;
 let frEditingWordId=null;
 let frShuffleMode=true;
-let frNewCatIcon='🗣️';
+let frNewCatIcon='💬';
 
 // ══════════════════════════════════════════════════════
 //  French — Render Entry
@@ -2930,7 +2933,7 @@ function frRenderCats(){
     const learned=words.filter(w=>s.learned[w.id]).length;
     const pct=words.length?Math.round(learned/words.length*100):0;
     return `<div class="fr-cat-card" onclick="frStartLearn(${cat.id})">
-      <div class="fr-cat-icon">${cat.icon}</div>
+      <div class="fr-cat-icon">${_frIconHtml(cat.icon,36)}</div>
       <div class="fr-cat-name">${escHtml(cat.name)}</div>
       <div class="fr-cat-meta">${words.length} 词 · 已掌握 ${learned}</div>
       <div class="fr-cat-bar"><div class="fr-cat-bar-fill" style="width:${pct}%;background:${cat.color}"></div></div>
@@ -3133,46 +3136,122 @@ function frJumpToIdx(idx){
   frShowCard();
 }
 // ── Category management ──────────────────────────────
+function _frIconHtml(icon,size=22){
+  if(!icon)return '❓';
+  if(icon.startsWith('data:image'))return `<img src="${icon}" style="width:${size}px;height:${size}px;object-fit:cover;border-radius:3px;display:block">`;
+  return icon;
+}
+function _frAutoSuggestIcon(name){
+  for(const [kw,icons] of Object.entries(FR_CAT_KEYWORDS)){
+    if(name.includes(kw))return icons[0];
+  }
+  return null;
+}
 function frRenderCatMgr(){
+  // Init global icon picker for "add" row
   const picker=document.getElementById('fr-icon-picker');
   if(picker&&!picker.dataset.init){
     picker.dataset.init='1';
-    picker.innerHTML=FR_CAT_ICONS.map(ic=>`<span class="fr-icon-opt" onclick="frSelectCatIcon('${ic}')">${ic}</span>`).join('');
+    picker.innerHTML=`<div style="display:flex;flex-wrap:wrap;gap:4px;padding:6px">`+
+      FR_CAT_ICONS.map(ic=>`<span class="fr-icon-opt" onclick="frSelectCatIcon('${ic}')">${ic}</span>`).join('')+
+      `</div><div style="padding:4px 6px 6px;border-top:1px solid var(--border);display:flex;gap:6px;align-items:center">
+        <input id="fr-icon-custom-input" placeholder="粘贴任意 emoji" style="flex:1;font-size:16px;border:1px solid var(--border);border-radius:4px;padding:3px 6px;outline:none" oninput="frSelectCatIcon(this.value.trim()||'💬')">
+        <label style="cursor:pointer;font-size:11px;color:var(--primary);white-space:nowrap">
+          📁 上传图片<input type="file" accept="image/*" style="display:none" onchange="frIconUpload(event,'new')">
+        </label>
+      </div>`;
   }
   const list=document.getElementById('fr-cat-list');if(!list)return;
   list.innerHTML=FR_CATEGORIES.map((cat,idx)=>{
     const n=FR_WORDS.filter(w=>w.catId===cat.id).length;
-    return `<div class="fr-cat-item">
-      <span class="fr-cat-item-icon">${cat.icon}</span>
-      <input class="fr-cat-item-name" value="${escHtml(cat.name)}" onchange="frUpdateCatName(${cat.id},this.value)" title="点击修改类别名">
+    const isEditingIcon=_frEditingCatIconId===cat.id;
+    return `<div class="fr-cat-item" style="flex-wrap:wrap">
+      <span class="fr-cat-item-icon" style="cursor:pointer;border:1px solid ${isEditingIcon?'var(--primary)':'transparent'};border-radius:4px;padding:1px"
+        onclick="frToggleCatIconEdit(${cat.id})" title="点击更换图标">${_frIconHtml(cat.icon)}</span>
+      <input class="fr-cat-item-name" value="${escHtml(cat.name)}" oninput="frAutoSuggestCatIcon(${cat.id},this.value)" onchange="frUpdateCatName(${cat.id},this.value)" title="点击修改类别名">
       <span style="font-size:11px;color:var(--text-tertiary);white-space:nowrap">${n} 词</span>
       <div style="display:flex;gap:2px;flex-shrink:0">
         <button class="arch-cat-act" onclick="frMoveCatDir(${cat.id},'up')" ${idx===0?'disabled':''} title="上移">↑</button>
         <button class="arch-cat-act" onclick="frMoveCatDir(${cat.id},'down')" ${idx===FR_CATEGORIES.length-1?'disabled':''} title="下移">↓</button>
         <button class="btn btn-sm btn-danger" onclick="frDeleteCategory(${cat.id})">删除</button>
       </div>
+      ${isEditingIcon?`<div style="width:100%;padding:6px 0 2px;display:flex;flex-direction:column;gap:4px">
+        <div style="display:flex;flex-wrap:wrap;gap:4px">${FR_CAT_ICONS.map(ic=>`<span class="fr-icon-opt${cat.icon===ic?' selected':''}" onclick="frSetCatIcon(${cat.id},'${ic}')">${ic}</span>`).join('')}</div>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:2px">
+          <input id="fr-cat-icon-custom-${cat.id}" placeholder="粘贴任意 emoji" style="flex:1;font-size:16px;border:1px solid var(--border);border-radius:4px;padding:3px 6px;outline:none" oninput="frSetCatIcon(${cat.id},this.value.trim()||cat.icon)">
+          <label style="cursor:pointer;font-size:11px;color:var(--primary);white-space:nowrap">
+            📁 上传图片<input type="file" accept="image/*" style="display:none" onchange="frIconUpload(event,${cat.id})">
+          </label>
+        </div>
+      </div>`:''}
     </div>`;
   }).join('');
+}
+function frToggleCatIconEdit(id){
+  _frEditingCatIconId=_frEditingCatIconId===id?null:id;
+  frRenderCatMgr();
+  if(_frEditingCatIconId!==null){
+    const inp=document.getElementById('fr-cat-icon-custom-'+id);
+    if(inp)inp.focus();
+  }
+}
+function frSetCatIcon(id,icon){
+  if(!icon||!icon.trim())return;
+  const cat=FR_CATEGORIES.find(c=>c.id===id);if(!cat)return;
+  cat.icon=icon.trim();
+  dbSave(db.saveFrCat(cat));
+  frRenderCatMgr();frRenderCats();
+}
+function frAutoSuggestCatIcon(id,name){
+  const cat=FR_CATEGORIES.find(c=>c.id===id);if(!cat)return;
+  const suggested=_frAutoSuggestIcon(name);
+  if(suggested&&suggested!==cat.icon){cat.icon=suggested;dbSave(db.saveFrCat(cat));frRenderCatMgr();frRenderCats();}
+}
+async function frIconUpload(ev,target){
+  const file=ev.target.files&&ev.target.files[0];if(!file)return;
+  if(file.size>200*1024){showToast('图标图片建议小于200KB','error');return;}
+  try{
+    const dataUrl=await new Promise(res=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.readAsDataURL(file);});
+    if(target==='new'){frSelectCatIcon(dataUrl);}
+    else{frSetCatIcon(target,dataUrl);}
+  }catch(e){showToast('图片读取失败','error');}
+  ev.target.value='';
 }
 function frToggleIconPicker(){
   const p=document.getElementById('fr-icon-picker');
   p.style.display=p.style.display==='none'?'flex':'none';
+  if(p.style.display!=='none'){p.style.flexDirection='column';}
 }
 function frSelectCatIcon(icon){
   frNewCatIcon=icon;
-  document.getElementById('fr-new-cat-icon-display').textContent=icon;
-  document.getElementById('fr-icon-picker').style.display='none';
-  document.querySelectorAll('.fr-icon-opt').forEach(el=>el.classList.toggle('selected',el.textContent===icon));
+  const disp=document.getElementById('fr-new-cat-icon-display');
+  if(disp){disp.innerHTML=_frIconHtml(icon,24);disp.dataset.icon=icon;}
+  if(!icon.startsWith('data:image'))document.getElementById('fr-icon-picker').style.display='none';
+  document.querySelectorAll('#fr-icon-picker .fr-icon-opt').forEach(el=>el.classList.toggle('selected',el.textContent===icon));
+}
+function frOnNewCatNameInput(name){
+  // Auto-suggest icon
+  const suggested=_frAutoSuggestIcon(name);
+  if(suggested){
+    frNewCatIcon=suggested;
+    const disp=document.getElementById('fr-new-cat-icon-display');
+    if(disp){disp.innerHTML=_frIconHtml(suggested,24);disp.dataset.icon=suggested;}
+  }
 }
 function frAddCategory(){
   const name=(document.getElementById('fr-new-cat-name').value||'').trim();
   if(!name){showToast('请输入类别名称','error');return;}
   if(FR_CATEGORIES.find(c=>c.name===name)){showToast('该名称已存在','error');return;}
   const colorIdx=FR_CATEGORIES.length%FR_CAT_COLORS.length;
-  const newCat={id:++FR_CAT_SEQ,name,icon:frNewCatIcon,color:FR_CAT_COLORS[colorIdx]};
+  // Read icon from display element (may be emoji or base64 image)
+  const dispEl=document.getElementById('fr-new-cat-icon-display');
+  const icon=dispEl?(dispEl.dataset.icon||frNewCatIcon):frNewCatIcon;
+  const newCat={id:++FR_CAT_SEQ,name,icon,color:FR_CAT_COLORS[colorIdx]};
   FR_CATEGORIES.push(newCat);
   dbSave(db.saveFrCat(newCat));
   document.getElementById('fr-new-cat-name').value='';
+  // Reset icon to default
+  frNewCatIcon='💬';if(dispEl){dispEl.innerHTML=_frIconHtml('💬',24);dispEl.dataset.icon='💬';}
   frRenderCatMgr();frRenderCats();frRenderVocabFilter();
   showToast('类别「'+name+'」已添加','success');
 }
