@@ -235,6 +235,14 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
 #preview-prev{left:14px;}
 #preview-next{right:14px;}
 .preview-counter{font-size:12px;color:var(--text-secondary);margin-right:auto;flex-shrink:0;}
+.preview-search-wrap{display:flex;align-items:center;gap:6px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 10px;min-width:0;flex:1;max-width:320px;}
+.preview-search-input{border:none;background:transparent;outline:none;font-size:13px;color:var(--text);flex:1;min-width:0;}
+.preview-doc-content{padding:24px 32px;max-width:860px;margin:0 auto;font-size:14px;line-height:1.8;color:var(--text);}
+.preview-doc-content h1,.preview-doc-content h2,.preview-doc-content h3{margin:1em 0 .4em;font-weight:600;}
+.preview-doc-content p{margin:.5em 0;}
+.preview-doc-content table{border-collapse:collapse;width:100%;margin:1em 0;}
+.preview-doc-content td,.preview-doc-content th{border:1px solid var(--border);padding:6px 10px;}
+.preview-doc-content mark{background:#FFD600;border-radius:2px;padding:0 2px;}
 /* Drag-to-reorder */
 .form-img-thumb{cursor:grab;transition:opacity .15s,outline .1s;}
 .form-img-thumb:active{cursor:grabbing;}
@@ -739,12 +747,17 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
     </div>
     <div class="preview-foot">
       <span class="preview-counter" id="preview-counter"></span>
+      <div class="preview-search-wrap" id="preview-search-wrap" style="display:none">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input id="preview-search-input" class="preview-search-input" type="text" placeholder="搜索文件内容…" oninput="previewSearch()" onkeydown="if(event.key==='Enter')previewSearchNext()">
+        <span id="preview-search-count" style="font-size:11px;color:var(--text-tertiary);white-space:nowrap;min-width:60px"></span>
+      </div>
       <button class="btn" id="preview-fs-btn" onclick="togglePreviewFs()" style="margin-left:0">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
         <span id="preview-fs-label">全屏</span>
       </button>
       <button class="btn" onclick="closePreview()">关闭</button>
-      <button class="btn btn-primary" onclick="showToast('下载功能开发中…','info')">
+      <button class="btn btn-primary" id="preview-download-btn" onclick="_previewDownload()">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         下载
       </button>
@@ -952,6 +965,14 @@ const db = {
   async saveFrProgress(uid,wid,date){ const {error}=await _sb.from('fr_progress').upsert({user_id:uid,word_id:wid,learned_date:date});if(error)throw error; },
   async saveFrStats(uid,s)      { const {error}=await _sb.from('fr_stats').upsert({user_id:uid,points:s.points,streak:s.streak,last_check_in:s.lastCheckIn});if(error)throw error; },
   async insertLog(log)          { await _sb.from('logs').insert({user_id:log.userId,action:log.action,detail:log.detail,time:log.time,ip:log.ip}); },
+  // 几内亚培训资料持久化（需先在 Supabase SQL 编辑器中运行）：
+  // create table if not exists arch_categories (id int primary key, name text, color text, sort_order int default 0);
+  // create table if not exists arch_files (id int primary key, cat_id int, name text, ext text, size text, date text, data_url text);
+  async saveArchCat(c,order)    { const {error}=await _sb.from('arch_categories').upsert({id:c.id,name:c.name,color:c.color,sort_order:order??0});if(error)throw error; },
+  async deleteArchCat(id)       { const {error}=await _sb.from('arch_categories').delete().eq('id',id);if(error)throw error; },
+  async saveArchCatsOrder(cats) { await Promise.all(cats.map((c,i)=>_sb.from('arch_categories').upsert({id:c.id,name:c.name,color:c.color,sort_order:i}))); },
+  async saveArchFile(f)         { const {error}=await _sb.from('arch_files').upsert({id:f.id,cat_id:f.catId,name:f.name,ext:f.ext,size:f.size,date:f.date,data_url:f.dataUrl||''});if(error)throw error; },
+  async deleteArchFile(id)      { const {error}=await _sb.from('arch_files').delete().eq('id',id);if(error)throw error; },
 };
 // 乐观更新辅助：UI 立即更新，后台存储，失败时提示
 function dbSave(promise){ promise.catch(e=>showToast('数据同步失败：'+e.message,'error')); }
@@ -1007,7 +1028,7 @@ function switchView(v){
   if(v==='archive') renderArchive();
   if(v==='settings'){initDemoBar();renderSettings();}
   if(v==='french') renderFrench();
-  if(v==='map'&&map) setTimeout(()=>map.invalidateSize(),10);
+  if(v==='map'&&map) setTimeout(()=>{map.invalidateSize();_fitMapToMarkers();},50);
 }
 
 // ══════════════════════════════════════════════════════
@@ -1135,7 +1156,10 @@ function selectCat(id){selectedCatId=id;archSearchQ='';document.getElementById('
 function archSearch(){archSearchQ=document.getElementById('arch-search').value.trim().toLowerCase();renderFileGrid();}
 function addCategory(){
   const inp=document.getElementById('arch-new-cat-input');const name=(inp.value||'').trim();if(!name)return;
-  CATEGORIES.push({id:++archCatIdSeq,name,color:CAT_COLORS[CATEGORIES.length%CAT_COLORS.length]});inp.value='';renderCatSidebar();
+  const newCat={id:++archCatIdSeq,name,color:CAT_COLORS[CATEGORIES.length%CAT_COLORS.length]};
+  CATEGORIES.push(newCat);inp.value='';
+  dbSave(db.saveArchCat(newCat,CATEGORIES.length-1));
+  renderCatSidebar();
 }
 function startRename(id){archEditingCatId=id;renderCatSidebar();}
 function cancelRename(){archEditingCatId=null;renderCatSidebar();}
@@ -1143,13 +1167,17 @@ function finishRename(id){
   if(archEditingCatId!==id)return;
   const inp=document.getElementById('rename-input-'+id);
   const name=inp?(inp.value||'').trim():'';
-  if(name){const cat=CATEGORIES.find(c=>c.id===id);if(cat)cat.name=name;}
+  if(name){
+    const cat=CATEGORIES.find(c=>c.id===id);
+    if(cat){cat.name=name;const order=CATEGORIES.findIndex(c=>c.id===id);dbSave(db.saveArchCat(cat,order));}
+  }
   archEditingCatId=null;renderCatSidebar();
 }
 function moveCatDir(id,dir){
   const idx=CATEGORIES.findIndex(c=>c.id===id);if(idx<0)return;
   if(dir==='up'&&idx>0)[CATEGORIES[idx-1],CATEGORIES[idx]]=[CATEGORIES[idx],CATEGORIES[idx-1]];
   if(dir==='down'&&idx<CATEGORIES.length-1)[CATEGORIES[idx],CATEGORIES[idx+1]]=[CATEGORIES[idx+1],CATEGORIES[idx]];
+  dbSave(db.saveArchCatsOrder(CATEGORIES));
   renderCatSidebar();
 }
 function confirmDelCat(id){
@@ -1157,31 +1185,43 @@ function confirmDelCat(id){
   const n=FILES.filter(f=>f.catId===id).length;
   showConfirm('删除分类',`删除分类「${cat.name}」？${n} 份资料将移至第一个分类。`,()=>{
     const fallback=CATEGORIES.find(c=>c.id!==id);
-    FILES.forEach(f=>{if(f.catId===id)f.catId=fallback?fallback.id:-1;});
+    FILES.forEach(f=>{if(f.catId===id){f.catId=fallback?fallback.id:-1;if(fallback)dbSave(db.saveArchFile(f));}});
     FILES=FILES.filter(f=>f.catId!==-1);
     CATEGORIES=CATEGORIES.filter(c=>c.id!==id);
+    dbSave(db.deleteArchCat(id));
     if(selectedCatId===id)selectedCatId=null;
     renderArchive();
   });
 }
 function confirmDelFile(id){
   const f=FILES.find(x=>x.id===id);if(!f)return;
-  showConfirm('确认删除',`删除「${f.name}」？此操作不可撤销。`,()=>{FILES=FILES.filter(x=>x.id!==id);renderArchive();});
+  showConfirm('确认删除',`删除「${f.name}」？此操作不可撤销。`,()=>{
+    FILES=FILES.filter(x=>x.id!==id);
+    dbSave(db.deleteArchFile(id));
+    renderArchive();
+  });
 }
 function viewFile(id){
   const f=FILES.find(x=>x.id===id);if(!f)return;
   openPreview({name:f.name,ext:f.ext,size:f.size,date:f.date});
 }
-function handleUpload(ev){
-  const files=Array.from(ev.target.files||[]);if(!files.length)return;
+async function handleUpload(ev){
+  const rawFiles=Array.from(ev.target.files||[]);if(!rawFiles.length)return;
   const catId=selectedCatId!==null?selectedCatId:(CATEGORIES[0]||{id:-1}).id;
-  files.forEach(file=>{
-    const parts=file.name.split('.');const ext=parts.length>1?parts[parts.length-1]:'';
+  const d=new Date();const date=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  for(const file of rawFiles){
+    const parts=file.name.split('.');const ext=parts.length>1?parts[parts.length-1].toLowerCase():'';
     const size=fmtSize(file.size);
-    const d=new Date();const date=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-    FILES.push({id:++archFileIdSeq,catId,name:file.name,ext,size,date});
-  });
-  ev.target.value='';showToast(files.length+' 份资料已添加','success');renderArchive();
+    // 读取文件内容用于预览（超过50MB的文件跳过）
+    let dataUrl='';
+    if(file.size<50*1024*1024){
+      try{dataUrl=await new Promise(res=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=()=>res('');r.readAsDataURL(file);});}catch(e){}
+    }
+    const newFile={id:++archFileIdSeq,catId,name:file.name,ext,size,date,dataUrl};
+    FILES.push(newFile);
+    dbSave(db.saveArchFile(newFile));
+  }
+  ev.target.value='';showToast(rawFiles.length+' 份资料已添加','success');renderArchive();
 }
 
 // ══════════════════════════════════════════════════════
@@ -1197,13 +1237,20 @@ function makeMarkerIcon(color,s=28){
   return L.divIcon({className:'',html:`<div style="width:${s}px;height:${s}px;background:${color};border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.22)"></div>`,iconSize:[s,s],iconAnchor:[s/2,s]});
 }
 function initMap(){
-  map=L.map('map',{zoomControl:true}).setView([25,10],2);
+  map=L.map('map',{zoomControl:true}).setView([10,15],3);
   streetLayer=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19});
   satelliteLayer=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{attribution:'© Esri',maxZoom:19});
   hybridLabelLayer=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Reference_Overlay/MapServer/tile/{z}/{y}/{x}',{attribution:'© Esri',maxZoom:19,pane:'overlayPane'});
   streetLayer.addTo(map);
   PROJECTS.forEach(p=>addMarker(p));
+  _fitMapToMarkers();
   map.on('click',e=>{if(editMode)openAddModal(e.latlng.lat,e.latlng.lng);});
+}
+function _fitMapToMarkers(){
+  if(!map)return;
+  const pts=PROJECTS.filter(p=>!isNaN(parseFloat(p.lat))&&!isNaN(parseFloat(p.lng))).map(p=>L.latLng(p.lat,p.lng));
+  if(pts.length===1){map.setView(pts[0],6);return;}
+  if(pts.length>1){map.fitBounds(L.latLngBounds(pts),{padding:[50,50],maxZoom:10});}
 }
 function setMapLayer(n){
   if(map.hasLayer(streetLayer))map.removeLayer(streetLayer);
@@ -1611,7 +1658,9 @@ function openPreview(f){
   document.getElementById('preview-modal').classList.add('open');
 }
 
+let _previewDocEl=null,_previewDocOrigHTML='',_previewCurrentFile=null,_previewSearchMatches=[];
 function _renderPreview(f){
+  _previewCurrentFile=f;
   const ext=(f.ext||'').toLowerCase();
   document.getElementById('preview-icon').style.background=fileBg(ext);
   document.getElementById('preview-icon').textContent=fileIcon(ext);
@@ -1625,21 +1674,120 @@ function _renderPreview(f){
   if(next){next.style.display=multi?'flex':'none';next.disabled=false;}
   const ctr=document.getElementById('preview-counter');
   if(ctr)ctr.textContent=multi?`${_prevIdx+1} / ${_prevCol.length}`:'';
+  // Reset search
+  _previewDocEl=null;_previewDocOrigHTML='';
+  const searchWrap=document.getElementById('preview-search-wrap');
+  const searchInput=document.getElementById('preview-search-input');
+  const searchCount=document.getElementById('preview-search-count');
+  if(searchInput)searchInput.value='';if(searchCount)searchCount.textContent='';
   // Body content (keep nav buttons; replace body-inner)
   const body=document.getElementById('preview-body');
-  // Remove old inner if exists
   const old=body.querySelector('.preview-inner');if(old)old.remove();
   const inner=document.createElement('div');inner.className='preview-inner';
   inner.style.cssText='width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:auto;';
   const imgExts=['png','jpg','jpeg','gif','webp','svg','bmp'];
   if(f.dataUrl&&f.dataUrl.startsWith('data:image')){
+    if(searchWrap)searchWrap.style.display='none';
     inner.innerHTML=`<img src="${f.dataUrl}" style="max-width:calc(100% - 100px);max-height:calc(88vh - 140px);display:block;object-fit:contain;padding:16px;" alt="${escHtml(f.name)}">`;
   }else if(imgExts.includes(ext)&&f.dataUrl){
+    if(searchWrap)searchWrap.style.display='none';
     inner.innerHTML=`<img src="${f.dataUrl}" style="max-width:calc(100% - 100px);display:block;object-fit:contain;padding:16px;">`;
+  }else if(ext==='pdf'&&f.dataUrl){
+    if(searchWrap)searchWrap.style.display='none';
+    inner.style.cssText='width:100%;height:100%;overflow:hidden;';
+    const blobUrl=_dataUrlToBlobUrl(f.dataUrl,'application/pdf');
+    inner.innerHTML=`<iframe src="${blobUrl}" style="width:100%;height:100%;border:none;" title="${escHtml(f.name)}"></iframe>`;
+    setTimeout(()=>URL.revokeObjectURL(blobUrl),120000);
+  }else if((ext==='docx'||ext==='doc')&&f.dataUrl){
+    if(searchWrap)searchWrap.style.display='flex';
+    inner.style.cssText='width:100%;height:100%;overflow:auto;';
+    inner.innerHTML=`<div style="padding:40px;text-align:center;color:var(--text-tertiary)">正在解析文档…</div>`;
+    _renderDocx(f,inner);
+  }else if((ext==='pptx'||ext==='ppt')&&f.dataUrl){
+    if(searchWrap)searchWrap.style.display='none';
+    inner.innerHTML=`<div class="preview-placeholder"><div class="big-icon">${fileIcon(ext)}</div><p style="color:var(--text-secondary);font-weight:500">${escHtml(f.name)}</p><p>PPT 格式暂不支持在线预览</p><button class="btn btn-primary" style="margin-top:12px" onclick="_previewDownload()">⬇ 下载查看</button></div>`;
   }else{
-    inner.innerHTML=`<div class="preview-placeholder"><div class="big-icon">${fileIcon(ext)}</div><p style="color:var(--text-secondary);font-weight:500">${escHtml(f.name)}</p><p>该格式暂不支持在线预览</p></div>`;
+    if(searchWrap)searchWrap.style.display='none';
+    inner.innerHTML=`<div class="preview-placeholder"><div class="big-icon">${fileIcon(ext)}</div><p style="color:var(--text-secondary);font-weight:500">${escHtml(f.name)}</p><p>该格式暂不支持在线预览</p>${f.dataUrl?`<button class="btn btn-primary" style="margin-top:12px" onclick="_previewDownload()">⬇ 下载查看</button>`:''}</div>`;
   }
   body.appendChild(inner);
+}
+function _dataUrlToBlobUrl(dataUrl,mimeType){
+  try{
+    const b64=dataUrl.split(',')[1];
+    const mime=mimeType||(dataUrl.split(',')[0].split(':')[1].split(';')[0]);
+    const bin=atob(b64);const ab=new ArrayBuffer(bin.length);const ia=new Uint8Array(ab);
+    for(let i=0;i<bin.length;i++)ia[i]=bin.charCodeAt(i);
+    return URL.createObjectURL(new Blob([ab],{type:mime}));
+  }catch(e){return '';}
+}
+function _previewDownload(){
+  const f=_previewCurrentFile;if(!f||!f.dataUrl)return;
+  const a=document.createElement('a');a.href=f.dataUrl;a.download=f.name||'file';document.body.appendChild(a);a.click();document.body.removeChild(a);
+}
+async function _renderDocx(f,container){
+  try{
+    if(!window.mammoth){
+      await new Promise((resolve,reject)=>{
+        const s=document.createElement('script');
+        s.src='https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js';
+        s.onload=resolve;s.onerror=()=>reject(new Error('mammoth 加载失败'));
+        document.head.appendChild(s);
+      });
+    }
+    const b64=f.dataUrl.split(',')[1];const bin=atob(b64);
+    const ab=new ArrayBuffer(bin.length);const ia=new Uint8Array(ab);
+    for(let i=0;i<bin.length;i++)ia[i]=bin.charCodeAt(i);
+    const result=await mammoth.convertToHtml({arrayBuffer:ab});
+    const docEl=document.createElement('div');
+    docEl.className='preview-doc-content';
+    docEl.innerHTML=result.value||'<p style="color:var(--text-tertiary)">文档内容为空</p>';
+    container.innerHTML='';container.appendChild(docEl);
+    _previewDocEl=docEl;_previewDocOrigHTML=docEl.innerHTML;
+  }catch(e){
+    container.innerHTML=`<div class="preview-placeholder"><div class="big-icon">📝</div><p>文档解析失败：${escHtml(e.message)}</p><button class="btn btn-primary" style="margin-top:12px" onclick="_previewDownload()">⬇ 下载查看</button></div>`;
+  }
+}
+let _previewSearchTimer=null,_previewMatchIdx=0;
+function previewSearchNext(){
+  if(!_previewDocEl)return;
+  const marks=_previewDocEl.querySelectorAll('mark');if(!marks.length)return;
+  _previewMatchIdx=(_previewMatchIdx+1)%marks.length;
+  marks[_previewMatchIdx].scrollIntoView({block:'center',behavior:'smooth'});
+}
+function previewSearch(){
+  clearTimeout(_previewSearchTimer);
+  _previewSearchTimer=setTimeout(()=>{
+    const q=(document.getElementById('preview-search-input').value||'').trim();
+    const cnt=document.getElementById('preview-search-count');
+    if(!_previewDocEl){if(cnt)cnt.textContent='';return;}
+    // Restore original HTML then highlight
+    _previewDocEl.innerHTML=_previewDocOrigHTML;
+    if(!q){if(cnt)cnt.textContent='';return;}
+    const count=_highlightTextNodes(_previewDocEl,q);
+    _previewMatchIdx=0;
+    if(cnt)cnt.textContent=count?`${count} 处匹配`:'无匹配';
+    const first=_previewDocEl.querySelector('mark');
+    if(first)first.scrollIntoView({block:'center',behavior:'smooth'});
+  },200);
+}
+function _highlightTextNodes(root,q){
+  const ql=q.toLowerCase();let count=0;
+  const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,null);
+  const nodes=[];while(walker.nextNode())nodes.push(walker.currentNode);
+  nodes.forEach(node=>{
+    const text=node.textContent;const tl=text.toLowerCase();
+    let idx=tl.indexOf(ql);if(idx<0)return;
+    const frag=document.createDocumentFragment();let last=0;
+    while(idx>=0){
+      frag.appendChild(document.createTextNode(text.slice(last,idx)));
+      const mark=document.createElement('mark');mark.textContent=text.slice(idx,idx+q.length);
+      frag.appendChild(mark);count++;last=idx+q.length;idx=tl.indexOf(ql,last);
+    }
+    frag.appendChild(document.createTextNode(text.slice(last)));
+    node.parentNode.replaceChild(frag,node);
+  });
+  return count;
 }
 
 function navigatePreview(dir){
@@ -1656,6 +1804,10 @@ function closePreview(){
   const mo=document.getElementById('preview-modal');mo.classList.remove('open','preview-fs');
   document.getElementById('preview-fs-label').textContent='全屏';
   const inner=mo.querySelector('.preview-inner');if(inner)inner.remove();
+  _previewDocEl=null;_previewDocOrigHTML='';_previewCurrentFile=null;
+  const si=document.getElementById('preview-search-input');if(si)si.value='';
+  const sc=document.getElementById('preview-search-count');if(sc)sc.textContent='';
+  const sw=document.getElementById('preview-search-wrap');if(sw)sw.style.display='none';
 }
 
 // ══════════════════════════════════════════════════════
@@ -2022,6 +2174,7 @@ function _rebuildMarkers(){
   Object.keys(markerLayer).forEach(id=>removeMarker(parseInt(id)));
   PROJECTS.forEach(p=>addMarker(p));
   updatePinCount();
+  _fitMapToMarkers();
 }
 
 async function initDB(){
@@ -2048,7 +2201,7 @@ async function initDB(){
     }
 
     // ── FR Categories ──
-    const {data:catRows}=await _sb.from('fr_categories').select('*').order('id');
+    const {data:catRows}=await _sb.from('fr_categories').select('*').order('sort_order',{nullsFirst:true}).order('id');
     if(catRows&&catRows.length){
       FR_CATEGORIES=catRows;
       FR_CAT_SEQ=Math.max(...catRows.map(c=>c.id),FR_CAT_SEQ);
@@ -2085,6 +2238,28 @@ async function initDB(){
       LOGS=logRows;
       logIdSeq=Math.max(...logRows.map(l=>l.id),logIdSeq);
     }
+
+    // ── Arch Categories（几内亚培训资料分类） ──
+    try{
+      const {data:archCatRows,error:ace}=await _sb.from('arch_categories').select('*').order('sort_order');
+      if(!ace&&archCatRows&&archCatRows.length){
+        CATEGORIES=archCatRows.map(r=>({id:r.id,name:r.name,color:r.color}));
+        archCatIdSeq=Math.max(...archCatRows.map(c=>c.id),archCatIdSeq);
+      }else if(!ace){
+        await Promise.all(CATEGORIES.map((c,i)=>_sb.from('arch_categories').upsert({id:c.id,name:c.name,color:c.color,sort_order:i})));
+      }
+    }catch(e){console.warn('arch_categories 表不存在，使用本地数据（请在 Supabase 中创建表）');}
+
+    // ── Arch Files（几内亚培训资料文件） ──
+    try{
+      const {data:archFileRows,error:afe}=await _sb.from('arch_files').select('*');
+      if(!afe&&archFileRows&&archFileRows.length){
+        FILES=archFileRows.map(r=>({id:r.id,catId:r.cat_id,name:r.name,ext:r.ext,size:r.size,date:r.date,dataUrl:r.data_url||''}));
+        archFileIdSeq=Math.max(...archFileRows.map(f=>f.id),archFileIdSeq);
+      }else if(!afe){
+        await Promise.all(FILES.map(f=>_sb.from('arch_files').upsert({id:f.id,cat_id:f.catId,name:f.name,ext:f.ext,size:f.size,date:f.date,data_url:''})));
+      }
+    }catch(e){console.warn('arch_files 表不存在，使用本地数据（请在 Supabase 中创建表）');}
   }catch(e){
     console.error('DB init error:',e);
     showToast('数据库连接失败，使用本地数据','error');
@@ -2559,13 +2734,17 @@ function frRenderCatMgr(){
     picker.innerHTML=FR_CAT_ICONS.map(ic=>`<span class="fr-icon-opt" onclick="frSelectCatIcon('${ic}')">${ic}</span>`).join('');
   }
   const list=document.getElementById('fr-cat-list');if(!list)return;
-  list.innerHTML=FR_CATEGORIES.map(cat=>{
+  list.innerHTML=FR_CATEGORIES.map((cat,idx)=>{
     const n=FR_WORDS.filter(w=>w.catId===cat.id).length;
     return `<div class="fr-cat-item">
       <span class="fr-cat-item-icon">${cat.icon}</span>
       <input class="fr-cat-item-name" value="${escHtml(cat.name)}" onchange="frUpdateCatName(${cat.id},this.value)" title="点击修改类别名">
       <span style="font-size:11px;color:var(--text-tertiary);white-space:nowrap">${n} 词</span>
-      <button class="btn btn-sm btn-danger" onclick="frDeleteCategory(${cat.id})">删除</button>
+      <div style="display:flex;gap:2px;flex-shrink:0">
+        <button class="arch-cat-act" onclick="frMoveCatDir(${cat.id},'up')" ${idx===0?'disabled':''} title="上移">↑</button>
+        <button class="arch-cat-act" onclick="frMoveCatDir(${cat.id},'down')" ${idx===FR_CATEGORIES.length-1?'disabled':''} title="下移">↓</button>
+        <button class="btn btn-sm btn-danger" onclick="frDeleteCategory(${cat.id})">删除</button>
+      </div>
     </div>`;
   }).join('');
 }
@@ -2597,6 +2776,14 @@ function frUpdateCatName(id,name){
   cat.name=name.trim();
   dbSave(db.saveFrCat(cat));
   frRenderCats();frRenderVocabFilter();
+}
+function frMoveCatDir(id,dir){
+  const idx=FR_CATEGORIES.findIndex(c=>c.id===id);if(idx<0)return;
+  if(dir==='up'&&idx>0)[FR_CATEGORIES[idx-1],FR_CATEGORIES[idx]]=[FR_CATEGORIES[idx],FR_CATEGORIES[idx-1]];
+  if(dir==='down'&&idx<FR_CATEGORIES.length-1)[FR_CATEGORIES[idx],FR_CATEGORIES[idx+1]]=[FR_CATEGORIES[idx+1],FR_CATEGORIES[idx]];
+  // Save new order to DB
+  FR_CATEGORIES.forEach((c,i)=>dbSave(db.saveFrCat({...c,sort_order:i})));
+  frRenderCatMgr();frRenderCats();
 }
 function frDeleteCategory(id){
   const cat=FR_CATEGORIES.find(c=>c.id===id);if(!cat)return;
