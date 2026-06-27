@@ -919,14 +919,24 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 // ══════════════════════════════════════════════════════
-//  Supabase — 配置（在 supabase.com 注册后填入）
+//  Supabase — 配置
 // ══════════════════════════════════════════════════════
 const SUPABASE_URL  = 'https://ropewyrektxoxchcuzv.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJvcGV3eXJla2N0eG94Y2hjdXp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI0ODAyNTgsImV4cCI6MjA5ODA1NjI1OH0.3AJ9DL3GUK_IavjDZQMEmPzQ8L_0y2jOM9_Xn84OyKc';
-const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+// Supabase 初始化保护：如果加载失败则用假客户端，不影响其他功能
+let _sb;
+try{
+  _sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+}catch(e){
+  console.warn('Supabase 初始化失败，将使用本地数据：', e.message);
+  // 创建空壳客户端，所有操作静默失败
+  const _noop = ()=>Promise.resolve({data:null,error:{message:'Supabase 未连接'}});
+  _sb = {from:()=>({select:_noop,insert:_noop,upsert:_noop,delete:()=>({eq:_noop}),order:()=>({limit:_noop}),eq:()=>({select:_noop,delete:()=>({eq:_noop})})})};
+}
 
 // ── DB 操作封装 ──────────────────────────────────────
 const db = {
@@ -945,6 +955,16 @@ const db = {
 };
 // 乐观更新辅助：UI 立即更新，后台存储，失败时提示
 function dbSave(promise){ promise.catch(e=>showToast('数据同步失败：'+e.message,'error')); }
+
+// 全局 JS 错误捕获 —— 帮助诊断问题
+window.onerror=function(msg,src,line){
+  console.error('JS错误:',msg,'行:',line);
+  if(typeof showToast==='function') showToast('页面错误(行'+line+'):'+msg,'error');
+  return false;
+};
+window.onunhandledrejection=function(e){
+  console.error('未处理的Promise错误:',e.reason);
+};
 
 // ══════════════════════════════════════════════════════
 //  Helpers
@@ -2110,21 +2130,10 @@ async function _loadUserFromToken(token){
 
 async function initWeComSSO(){
   if(!WECOM_SSO.enabled){
-    _authShowLoading('正在加载数据...');
-    try{
-      // 10秒超时保护：超时后跳过DB直接用本地数据
-      await Promise.race([
-        initDB(),
-        new Promise((_,rej)=>setTimeout(()=>rej(new Error('连接超时，使用本地数据')),10000))
-      ]);
-    }catch(e){
-      console.warn('DB load:', e.message);
-      showToast(e.message,'error');
-    }finally{
-      _authHide(); // 无论成功失败都关掉loading
-    }
+    // 立即显示应用，后台静默加载数据库（不阻塞界面）
     logAction('login',`用户「${currentUser.name}」登录系统`);
     applyPermissionsToUI();
+    initDB().catch(e=>console.warn('DB后台加载失败:',e.message));
     return;
   }
 
