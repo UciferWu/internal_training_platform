@@ -1530,8 +1530,10 @@ function saveProject(){
 //  Delete
 // ══════════════════════════════════════════════════════
 function confirmDelete(id){
-  pendingDeleteId=id;const p=PROJECTS.find(x=>x.id===id);
-  showConfirm('确认删除',`将删除「${p?pName(p):''}」，此操作不可撤销。`,executeDelete);
+  pendingDeleteId=id;
+  const p=PROJECTS.find(x=>x.id===id||x.id===+id);
+  if(!p){showToast('找不到项目 id='+id,'error');console.warn('PROJECTS:',PROJECTS,'查找id:',id,typeof id);return;}
+  showConfirm('确认删除',`将删除「${pName(p)}」，此操作不可撤销。`,executeDelete);
 }
 function executeDelete(){
   if(pendingDeleteId===null)return;
@@ -1547,13 +1549,24 @@ function executeDelete(){
 // ══════════════════════════════════════════════════════
 let _confirmCb=null;
 function showConfirm(title,msg,cb){
-  _confirmCb=cb;
-  document.getElementById('confirm-title').textContent=title;
-  document.getElementById('confirm-msg').textContent=msg;
-  document.getElementById('confirm-ok-btn').onclick=()=>{closeConfirm();if(_confirmCb)_confirmCb();};
-  document.getElementById('confirm-overlay').classList.add('open');
+  try{
+    _confirmCb=cb;
+    document.getElementById('confirm-title').textContent=title;
+    document.getElementById('confirm-msg').textContent=msg;
+    document.getElementById('confirm-ok-btn').onclick=()=>{closeConfirm();if(_confirmCb)_confirmCb();};
+    const ov=document.getElementById('confirm-overlay');
+    ov.classList.add('open');
+    ov.style.display='flex'; // 强制显示，避免 CSS 未生效
+  }catch(e){
+    showToast('操作失败：'+e.message,'error');
+    console.error('showConfirm error:',e);
+  }
 }
-function closeConfirm(){document.getElementById('confirm-overlay').classList.remove('open');_confirmCb=null;}
+function closeConfirm(){
+  const ov=document.getElementById('confirm-overlay');
+  ov.classList.remove('open');ov.style.display='';
+  _confirmCb=null;
+}
 
 // ══════════════════════════════════════════════════════
 //  Preview Modal  (with prev/next navigation)
@@ -1963,7 +1976,8 @@ function toggleUserStatus(id){
   renderSettings();
 }
 function confirmDeleteUser(id){
-  const u=USERS.find(x=>x.id===id);if(!u)return;
+  const u=USERS.find(x=>x.id===id||x.id===+id);
+  if(!u){showToast('找不到用户 id='+id,'error');console.warn('USERS:',USERS,'查找id:',id);return;}
   showConfirm('删除用户',`删除用户「${u.name}」（${ROLE_LABEL[u.role]}）？此操作不可撤销。`,()=>{
     logAction('delete',`删除用户「${u.name}」`);
     dbSave(db.deleteUser(id));
