@@ -2042,7 +2042,9 @@ async function initDB(){
       USERS=userRows;
       userIdSeq=Math.max(...userRows.map(u=>u.id),userIdSeq);
     }else{
-      await Promise.all(USERS.map(u=>_sb.from('users').upsert({id:u.id,name:u.name,initials:u.initials,email:u.email,role:u.role,status:u.status,last_login:u.lastLogin||u.last_login||null})));
+      const userResults=await Promise.all(USERS.map(u=>_sb.from('users').upsert({id:u.id,name:u.name,initials:u.initials,email:u.email,role:u.role,status:u.status,last_login:u.lastLogin||u.last_login||null})));
+      const userErr=userResults.find(r=>r.error);
+      if(userErr)console.error('users upsert error:',JSON.stringify(userErr.error));
     }
 
     // ── FR Categories ──
