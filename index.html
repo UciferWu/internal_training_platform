@@ -946,9 +946,9 @@ const db = {
   async deleteUser(id)          { const {error}=await _sb.from('users').delete().eq('id',id);if(error)throw error; },
   async saveFrCat(c)            { const {error}=await _sb.from('fr_categories').upsert(c);if(error)throw error; },
   async deleteFrCat(id)         { const {error}=await _sb.from('fr_categories').delete().eq('id',id);if(error)throw error; },
-  async saveFrWord(w)           { const {error}=await _sb.from('fr_words').upsert({...w,cat_id:w.catId});if(error)throw error; },
+  async saveFrWord(w)           { const {error}=await _sb.from('fr_words').upsert({id:w.id,cat_id:w.catId,fr:w.fr,zh:w.zh,phonetic:w.phonetic,zh_approx:w.zhApprox,example:w.example});if(error)throw error; },
   async deleteFrWord(id)        { const {error}=await _sb.from('fr_words').delete().eq('id',id);if(error)throw error; },
-  async saveFrWordsBatch(words) { const {error}=await _sb.from('fr_words').upsert(words.map(w=>({...w,cat_id:w.catId})));if(error)throw error; },
+  async saveFrWordsBatch(words) { const {error}=await _sb.from('fr_words').upsert(words.map(w=>({id:w.id,cat_id:w.catId,fr:w.fr,zh:w.zh,phonetic:w.phonetic,zh_approx:w.zhApprox,example:w.example})));if(error)throw error; },
   async saveFrProgress(uid,wid,date){ const {error}=await _sb.from('fr_progress').upsert({user_id:uid,word_id:wid,learned_date:date});if(error)throw error; },
   async saveFrStats(uid,s)      { const {error}=await _sb.from('fr_stats').upsert({user_id:uid,points:s.points,streak:s.streak,last_check_in:s.lastCheckIn});if(error)throw error; },
   async insertLog(log)          { await _sb.from('logs').insert({user_id:log.userId,action:log.action,detail:log.detail,time:log.time,ip:log.ip}); },
@@ -2060,7 +2060,7 @@ async function initDB(){
       FR_WORDS=wordRows.map(w=>({...w,catId:w.cat_id}));
       FR_WORD_SEQ=Math.max(...wordRows.map(w=>w.id),FR_WORD_SEQ);
     }else{
-      await Promise.all(FR_WORDS.map(w=>_sb.from('fr_words').upsert({...w,cat_id:w.catId})));
+      await Promise.all(FR_WORDS.map(w=>_sb.from('fr_words').upsert({id:w.id,cat_id:w.catId,fr:w.fr,zh:w.zh,phonetic:w.phonetic,zh_approx:w.zhApprox,example:w.example})));
     }
 
     // ── FR Progress（当前用户） ──
