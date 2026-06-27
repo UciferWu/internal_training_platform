@@ -942,7 +942,7 @@ try{
 const db = {
   async saveProject(p)          { const {error}=await _sb.from('projects').upsert({id:p.id,data:p});if(error)throw error; },
   async deleteProject(id)       { const {error}=await _sb.from('projects').delete().eq('id',id);if(error)throw error; },
-  async saveUser(u)             { const {error}=await _sb.from('users').upsert(u);if(error)throw error; },
+  async saveUser(u)             { const {error}=await _sb.from('users').upsert({id:u.id,name:u.name,initials:u.initials,email:u.email,role:u.role,status:u.status,last_login:u.lastLogin||u.last_login||null});if(error)throw error; },
   async deleteUser(id)          { const {error}=await _sb.from('users').delete().eq('id',id);if(error)throw error; },
   async saveFrCat(c)            { const {error}=await _sb.from('fr_categories').upsert(c);if(error)throw error; },
   async deleteFrCat(id)         { const {error}=await _sb.from('fr_categories').delete().eq('id',id);if(error)throw error; },
@@ -2042,7 +2042,7 @@ async function initDB(){
       USERS=userRows;
       userIdSeq=Math.max(...userRows.map(u=>u.id),userIdSeq);
     }else{
-      await Promise.all(USERS.map(u=>_sb.from('users').upsert(u)));
+      await Promise.all(USERS.map(u=>_sb.from('users').upsert({id:u.id,name:u.name,initials:u.initials,email:u.email,role:u.role,status:u.status,last_login:u.lastLogin||u.last_login||null})));
     }
 
     // ── FR Categories ──
