@@ -182,10 +182,16 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
 .form-hint{font-size:11px;color:var(--text-tertiary);margin-top:4px;}
 
 /* ── Project modal ── */
-.proj-modal-box{width:620px;max-width:96vw;max-height:92vh;display:flex;flex-direction:column;padding:0;}
-.proj-modal-head{padding:20px 24px 14px;border-bottom:1px solid var(--border);}
+.proj-modal-box{width:930px;max-width:96vw;max-height:92vh;display:flex;flex-direction:column;padding:0;}
+.proj-modal-head{padding:16px 24px 0;border-bottom:1px solid var(--border);display:flex;align-items:flex-end;justify-content:space-between;flex-shrink:0;}
 .proj-modal-scroll{flex:1;overflow-y:auto;padding:16px 24px;}
 .proj-modal-foot{padding:14px 24px;border-top:1px solid var(--border);}
+/* Modal tabs */
+.modal-tab-bar{display:flex;gap:0;flex:1;min-width:0;}
+.modal-tab{padding:0 18px;height:40px;border:none;background:transparent;font-size:13px;font-weight:500;color:var(--text-secondary);cursor:pointer;border-bottom:2.5px solid transparent;transition:color .15s,border-color .15s;font-family:inherit;white-space:nowrap;margin-bottom:-1px;}
+.modal-tab:hover{color:var(--text);}
+.modal-tab.active{color:var(--primary);border-bottom-color:var(--primary);}
+.modal-title-edit{font-size:16px;font-weight:600;padding-bottom:14px;}
 .modal-sec-hd{font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.6px;padding-bottom:8px;border-bottom:1px solid var(--border);margin-bottom:12px;}
 /* Shareholder checkboxes */
 .checkbox-group{display:flex;flex-wrap:wrap;gap:6px;padding:4px 0;}
@@ -510,7 +516,7 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
 <!-- ── Map View ── -->
 <div class="main" id="map-view" style="position:relative">
   <div id="map"></div>
-  <div class="edit-banner" id="edit-banner">✏️ 编辑模式 — 点击地图空白处新建项目坐标</div>
+  <div class="edit-banner" id="edit-banner">✏️ 编辑模式 — 点击地图新建项目或设施坐标</div>
   <div class="legend" id="legend">
     <div class="legend-title">项目状态</div>
     <div class="legend-row"><div class="legend-dot" style="background:#BA7517"></div>研究中</div>
@@ -519,6 +525,7 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
     <div class="legend-row"><div class="legend-dot" style="background:#7B5EA7"></div>扩建中</div>
     <div class="legend-row"><div class="legend-dot" style="background:#5F5E5A"></div>完成结束</div>
     <div class="legend-row"><div class="legend-dot" style="background:#A32D2D"></div>取消</div>
+    <div class="legend-row" style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px"><div class="legend-dot" style="background:#7B5EA7;border-radius:3px"></div>项目设施</div>
   </div>
   <div class="detail-panel hidden" id="detail-panel">
     <div class="detail-empty" id="detail-empty">
@@ -576,17 +583,23 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
 
 </div><!-- .app -->
 
-<!-- ── Project Add/Edit Modal ── -->
+<!-- ── Project / Facility Add/Edit Modal ── -->
 <div class="modal-overlay" id="proj-modal">
   <div class="modal proj-modal-box">
-    <div class="proj-modal-head modal-header">
-      <span class="modal-title" id="modal-title">新建业务项目</span>
-      <button class="modal-close" onclick="closeModal()">
+    <div class="proj-modal-head">
+      <div id="modal-tab-bar" class="modal-tab-bar">
+        <button class="modal-tab active" id="modal-tab-proj" onclick="switchModalTab('proj')">🏢 新建项目</button>
+        <button class="modal-tab" id="modal-tab-fac" onclick="switchModalTab('fac')">🔧 新建设施</button>
+      </div>
+      <span class="modal-title-edit" id="modal-title-edit" style="display:none"></span>
+      <button class="modal-close" onclick="closeModal()" style="margin-bottom:12px">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
       </button>
     </div>
     <div class="proj-modal-scroll">
 
+    <!-- ══ 新建项目表单 ══ -->
+    <div id="modal-proj-form">
       <!-- 基本信息 -->
       <div class="modal-sec-hd">基本信息</div>
       <div class="form-group">
@@ -665,23 +678,72 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
         </button>
       </div>
 
-      <!-- 培训资料 -->
-      <div class="modal-sec-hd" style="margin-top:18px">培训资料</div>
+      <!-- 项目资料 -->
+      <div class="modal-sec-hd" style="margin-top:18px">项目资料</div>
       <div id="form-mat-list" class="form-mat-list"></div>
       <div style="margin-top:8px">
         <input type="file" id="mat-file-input" multiple style="display:none" onchange="handleFormMatUpload(event)">
-        <button class="btn btn-sm" onclick="document.getElementById('mat-file-input').click()">
+        <button class="btn btn-sm" id="mat-upload-btn" onclick="document.getElementById('mat-file-input').click()">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
           上传资料
         </button>
       </div>
+    </div><!-- #modal-proj-form -->
+
+    <!-- ══ 新建设施表单 ══ -->
+    <div id="modal-fac-form" style="display:none">
+      <div class="modal-sec-hd">设施信息</div>
+      <div class="form-group">
+        <label class="form-label">关联项目<span class="req">*</span></label>
+        <select class="form-select" id="fac-project-id"><option value="">请选择关联项目</option></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">设施名称<span class="req">*</span></label>
+        <input class="form-input" type="text" id="fac-name" placeholder="例：生活营地 A 区">
+      </div>
+      <div class="form-row-2">
+        <div class="form-group">
+          <label class="form-label">纬度<span class="req">*</span></label>
+          <input class="form-input" type="number" id="fac-lat" placeholder="39.9042" step="0.0001">
+        </div>
+        <div class="form-group">
+          <label class="form-label">经度<span class="req">*</span></label>
+          <input class="form-input" type="number" id="fac-lng" placeholder="116.4074" step="0.0001">
+        </div>
+      </div>
+      <div class="form-hint" style="margin-top:-6px;margin-bottom:12px">💡 在编辑模式下点击地图可自动填入坐标</div>
+      <div class="form-group">
+        <label class="form-label">设施描述</label>
+        <div class="quill-wrap"><div id="quill-editor-fac"></div></div>
+      </div>
+      <!-- 设施图片 -->
+      <div class="modal-sec-hd" style="margin-top:18px">设施图片</div>
+      <div id="fac-img-grid" class="form-img-grid"></div>
+      <div style="margin-top:8px">
+        <input type="file" id="fac-img-file-input" accept="image/*" multiple style="display:none" onchange="handleFacImgUpload(event)">
+        <button class="btn btn-sm" id="fac-img-upload-btn" onclick="document.getElementById('fac-img-file-input').click()">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+          上传图片
+        </button>
+      </div>
+      <!-- 设施资料 -->
+      <div class="modal-sec-hd" style="margin-top:18px">设施资料</div>
+      <div id="fac-mat-list" class="form-mat-list"></div>
+      <div style="margin-top:8px">
+        <input type="file" id="fac-mat-file-input" multiple style="display:none" onchange="handleFacMatUpload(event)">
+        <button class="btn btn-sm" id="fac-mat-upload-btn" onclick="document.getElementById('fac-mat-file-input').click()">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+          上传资料
+        </button>
+      </div>
+    </div><!-- #modal-fac-form -->
 
     </div><!-- .proj-modal-scroll -->
     <div class="proj-modal-foot modal-footer">
       <button class="btn" onclick="closeModal()">取消</button>
-      <button class="btn btn-primary" onclick="saveProject()">
+      <button class="btn btn-primary" onclick="saveModalEntry()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-        <span id="modal-save-label">保存</span>
+        <span id="modal-save-label">保存项目</span>
       </button>
     </div>
   </div>
@@ -965,6 +1027,10 @@ const db = {
   async saveFrProgress(uid,wid,date){ const {error}=await _sb.from('fr_progress').upsert({user_id:uid,word_id:wid,learned_date:date});if(error)throw error; },
   async saveFrStats(uid,s)      { const {error}=await _sb.from('fr_stats').upsert({user_id:uid,points:s.points,streak:s.streak,last_check_in:s.lastCheckIn});if(error)throw error; },
   async insertLog(log)          { await _sb.from('logs').insert({user_id:log.userId,action:log.action,detail:log.detail,time:log.time,ip:log.ip}); },
+  // 项目设施持久化（需先在 Supabase SQL 编辑器中运行）：
+  // create table if not exists facilities (id int primary key, project_id int, name text, lat float, lng float, descr text, images jsonb default '[]', materials jsonb default '[]');
+  async saveFacility(f)   { const {error}=await _sb.from('facilities').upsert({id:f.id,project_id:f.projectId,name:f.name,lat:f.lat,lng:f.lng,descr:f.desc||'',images:JSON.stringify(f.images||[]),materials:JSON.stringify(f.materials||[])});if(error)throw error; },
+  async deleteFacility(id){ const {error}=await _sb.from('facilities').delete().eq('id',id);if(error)throw error; },
   // 几内亚培训资料持久化（需先在 Supabase SQL 编辑器中运行）：
   // create table if not exists arch_categories (id int primary key, name text, color text, sort_order int default 0);
   // create table if not exists arch_files (id int primary key, cat_id int, name text, ext text, size text, date text, data_url text);
@@ -1228,14 +1294,30 @@ async function handleUpload(ev){
 //  Map
 // ══════════════════════════════════════════════════════
 let map,streetLayer,satelliteLayer,hybridLabelLayer;
-let currentLayer='street',markerLayer={};
-let editMode=false,activeProjectId=null,editingId=null,pendingDeleteId=null;
+let currentLayer='street',markerLayer={},facilityMarkerLayer={};
+let editMode=false,activeProjectId=null,activeFacilityId=null,editingId=null,editingFacilityId=null,pendingDeleteId=null;
+let FACILITIES=[],facilityIdSeq=2000;
+let modalTab='proj';
+// Facility form state
+let facImages=[],facMaterials=[],facImgSeq=0,facMatSeq=0;
 const TYPE_ICON={video:'🎬',doc:'📄',img:'🖼️'};
 const TYPE_CLASS={video:'icon-video',doc:'icon-doc',img:'icon-img'};
 
 function makeMarkerIcon(color,s=28){
   return L.divIcon({className:'',html:`<div style="width:${s}px;height:${s}px;background:${color};border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.22)"></div>`,iconSize:[s,s],iconAnchor:[s/2,s]});
 }
+function makeFacilityIcon(s=26){
+  return L.divIcon({className:'',html:`<div style="width:${s}px;height:${s}px;background:#7B5EA7;border-radius:6px;border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.22);display:flex;align-items:center;justify-content:center;font-size:13px;line-height:1">⚙</div>`,iconSize:[s,s],iconAnchor:[s/2,s/2]});
+}
+function addFacilityMarker(f){
+  const proj=PROJECTS.find(p=>p.id===f.projectId);
+  const m=L.marker([f.lat,f.lng],{icon:makeFacilityIcon()}).addTo(map);
+  m.bindTooltip(`<strong>${escHtml(f.name)}</strong>${proj?`<br><small>📍 ${escHtml(pName(proj))}</small>`:''}`,{direction:'top',offset:[0,-12]});
+  m.on('click',e=>{L.DomEvent.stopPropagation(e);openFacilityDetail(f.id);});
+  facilityMarkerLayer[f.id]=m;
+}
+function removeFacilityMarker(id){if(facilityMarkerLayer[id]){map.removeLayer(facilityMarkerLayer[id]);delete facilityMarkerLayer[id];}}
+function refreshFacilityMarker(f){removeFacilityMarker(f.id);addFacilityMarker(f);}
 function initMap(){
   map=L.map('map',{zoomControl:true}).setView([10,15],3);
   streetLayer=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19});
@@ -1285,7 +1367,7 @@ function openDetail(id){
   if(p.level==='保密'&&!can('viewConfidential')){
     showToast('您没有权限查看保密项目','error');return;
   }
-  activeProjectId=id;
+  activeProjectId=id;activeFacilityId=null;
   logAction('view',`查看项目「${pName(p)}」`);
   document.getElementById('detail-panel').classList.remove('hidden');
   document.getElementById('detail-empty').style.display='none';
@@ -1296,7 +1378,7 @@ function openDetail(id){
   // Register contexts for navigation
   window._detailCtx=allMats.map(c=>c.isContent?{name:c.title,ext:'doc',size:'',date:c.meta}:{name:c.matObj.name,ext:c.matObj.ext,size:c.matObj.size,date:'',dataUrl:c.matObj.dataUrl||''});
   window._detailImgCtx=(p.images||[]).map(img=>({name:img.name,ext:'jpg',size:img.size,date:'',dataUrl:img.dataUrl||''}));
-  const contentsHtml=allMats.length===0?`<p style="font-size:13px;color:#B4B2A9;padding:4px 0">暂无培训资料</p>`:allMats.map((c,ci)=>`<div class="content-item" onclick="openPreviewInCtx('detail',${ci})"><div class="content-icon ${TYPE_CLASS[c.type]||'icon-doc'}" style="background:${c.isContent?'':fileBg(c.matObj?c.matObj.ext:'doc')}">${TYPE_ICON[c.type]||fileIcon(c.isContent?'doc':(c.matObj?c.matObj.ext:''))}</div><div style="min-width:0"><div class="content-item-title">${escHtml(c.title)}</div><div class="content-item-meta">${escHtml(c.meta)}</div></div></div>`).join('');
+  const contentsHtml=allMats.length===0?`<p style="font-size:13px;color:#B4B2A9;padding:4px 0">暂无项目资料</p>`:allMats.map((c,ci)=>`<div class="content-item" onclick="openPreviewInCtx('detail',${ci})"><div class="content-icon ${TYPE_CLASS[c.type]||'icon-doc'}" style="background:${c.isContent?'':fileBg(c.matObj?c.matObj.ext:'doc')}">${TYPE_ICON[c.type]||fileIcon(c.isContent?'doc':(c.matObj?c.matObj.ext:''))}</div><div style="min-width:0"><div class="content-item-title">${escHtml(c.title)}</div><div class="content-item-meta">${escHtml(c.meta)}</div></div></div>`).join('');
   const imgSection=(p.images&&p.images.length)?`<div class="section"><div class="section-title">项目图片 (${p.images.length})</div><div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:4px">${p.images.map((img,ii)=>`<div style="width:70px;height:70px;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--border);cursor:pointer;flex-shrink:0" onclick="openPreviewInCtx('detailImg',${ii})"><img src="${img.dataUrl||''}" style="width:100%;height:100%;object-fit:cover;display:block"></div>`).join('')}</div></div>`:'';
   const editBtns=(editMode&&can('editProject'))?`<div class="detail-actions"><button class="btn btn-sm" onclick="openEditModal(${p.id})"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>编辑</button><button class="btn btn-sm btn-danger" onclick="confirmDelete(${p.id})"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>删除</button></div>`:'';
   dc.innerHTML=`
@@ -1319,9 +1401,18 @@ function openDetail(id){
     </div>
   </div>
   <div class="section"><div class="section-title">项目描述</div>${descHtml}</div>
-  <div class="section" style="flex:1"><div class="section-title">培训资料 (${allMats.length})</div><div class="content-list">${contentsHtml}</div></div>
+  <div class="section" style="flex:1"><div class="section-title">项目资料 (${allMats.length})</div><div class="content-list">${contentsHtml}</div></div>
   ${imgSection}`;
+  // Append facility section if any
+  const projFacs=FACILITIES.filter(f=>f.projectId===id);
+  if(projFacs.length){
+    const facHtml=projFacs.map(f=>`<div class="content-item" onclick="openFacilityDetail(${f.id})"><div class="content-icon icon-doc" style="background:#EDE9F5;font-size:16px">⚙</div><div style="min-width:0"><div class="content-item-title">${escHtml(f.name)}</div><div class="content-item-meta">${f.lat.toFixed(4)}, ${f.lng.toFixed(4)}</div></div></div>`).join('');
+    const facSection=document.createElement('div');facSection.className='section';
+    facSection.innerHTML=`<div class="section-title">项目设施 (${projFacs.length})</div><div class="content-list">${facHtml}</div>`;
+    dc.appendChild(facSection);
+  }
   Object.values(markerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='.5';});
+  Object.values(facilityMarkerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='.5';});
   if(markerLayer[id]){markerLayer[id].getElement().style.opacity='1';map.panTo([p.lat,p.lng],{animate:true,duration:.4});}
 }
 function closeDetail(){
@@ -1329,7 +1420,8 @@ function closeDetail(){
   document.getElementById('detail-empty').style.display='flex';
   document.getElementById('detail-content').style.display='none';
   Object.values(markerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='1';});
-  activeProjectId=null;
+  Object.values(facilityMarkerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='1';});
+  activeProjectId=null;activeFacilityId=null;
 }
 
 // ══════════════════════════════════════════════════════
@@ -1516,9 +1608,12 @@ function matDrop(ev,id){
 //  Modal Open / Close
 // ══════════════════════════════════════════════════════
 function openAddModal(lat,lng){
-  editingId=null;
-  document.getElementById('modal-title').textContent='新建业务项目';
-  document.getElementById('modal-save-label').textContent='保存';
+  editingId=null;editingFacilityId=null;
+  // Show tabs (create mode)
+  document.getElementById('modal-tab-bar').style.display='flex';
+  document.getElementById('modal-title-edit').style.display='none';
+  switchModalTab('proj');
+  // Reset project form
   document.getElementById('f-name-zh').value='';
   if(qEditors['zh'])qEditors['zh'].setContents([]);
   document.getElementById('f-lat').value=lat!=null?lat.toFixed(4):'';
@@ -1530,15 +1625,30 @@ function openAddModal(lat,lng){
   document.getElementById('f-pm2').value='';
   formImages=[];formMaterials=[];formImgSeq=0;formMatSeq=0;
   renderFormImgGrid();renderFormMatList();
+  // Reset facility form
+  _populateFacilityProjectSelect();
+  document.getElementById('fac-project-id').value='';
+  document.getElementById('fac-name').value='';
+  document.getElementById('fac-lat').value=lat!=null?lat.toFixed(4):'';
+  document.getElementById('fac-lng').value=lng!=null?lng.toFixed(4):'';
+  if(qEditors['fac'])qEditors['fac'].setContents([]);
+  facImages=[];facMaterials=[];facImgSeq=0;facMatSeq=0;
+  renderFacImgGrid();renderFacMatList();
   clearInvalid();
   document.getElementById('proj-modal').classList.add('open');
   setTimeout(()=>document.getElementById('f-name-zh').focus(),80);
 }
 function openEditModal(id){
   const p=PROJECTS.find(x=>x.id===id);if(!p)return;
-  editingId=id;
-  document.getElementById('modal-title').textContent='编辑业务项目';
-  document.getElementById('modal-save-label').textContent='更新';
+  editingId=id;editingFacilityId=null;
+  // Hide tabs (edit mode)
+  document.getElementById('modal-tab-bar').style.display='none';
+  document.getElementById('modal-title-edit').style.display='';
+  document.getElementById('modal-title-edit').textContent='编辑业务项目';
+  document.getElementById('modal-proj-form').style.display='';
+  document.getElementById('modal-fac-form').style.display='none';
+  modalTab='proj';
+  document.getElementById('modal-save-label').textContent='更新项目';
   document.getElementById('f-name-zh').value=pName(p);
   if(qEditors['zh'])qEditors['zh'].clipboard.dangerouslyPasteHTML(pLoc(p));
   document.getElementById('f-lat').value=p.lat;
@@ -1555,7 +1665,186 @@ function openEditModal(id){
   document.getElementById('proj-modal').classList.add('open');
   setTimeout(()=>document.getElementById('f-name-zh').focus(),80);
 }
-function closeModal(){document.getElementById('proj-modal').classList.remove('open');}
+function closeModal(){document.getElementById('proj-modal').classList.remove('open');editingFacilityId=null;}
+
+// ── Modal Tab Switching ──
+function switchModalTab(tab){
+  modalTab=tab;
+  document.getElementById('modal-tab-proj').classList.toggle('active',tab==='proj');
+  document.getElementById('modal-tab-fac').classList.toggle('active',tab==='fac');
+  document.getElementById('modal-proj-form').style.display=tab==='proj'?'':'none';
+  document.getElementById('modal-fac-form').style.display=tab==='fac'?'':'none';
+  document.getElementById('modal-save-label').textContent=tab==='proj'?'保存项目':'保存设施';
+  if(tab==='fac'&&!qEditors['fac']){
+    const toolbar=[[{header:[1,2,false]}],['bold','italic','underline'],[{'list':'ordered'},{'list':'bullet'}],['clean']];
+    qEditors['fac']=new Quill('#quill-editor-fac',{theme:'snow',modules:{toolbar},placeholder:'输入设施描述、功能说明等…'});
+  }
+}
+function saveModalEntry(){
+  if(modalTab==='proj'||editingId!==null)saveProject();
+  else saveFacility();
+}
+
+// ── Facility: populate project select ──
+function _populateFacilityProjectSelect(){
+  const sel=document.getElementById('fac-project-id');if(!sel)return;
+  sel.innerHTML=`<option value="">请选择关联项目</option>`+PROJECTS.map(p=>`<option value="${p.id}">${escHtml(pName(p))}</option>`).join('');
+}
+
+// ── Facility: image upload ──
+let _facImgDragId=null;
+async function handleFacImgUpload(ev){
+  const files=Array.from(ev.target.files||[]);ev.target.value='';
+  for(const file of files){
+    const id=++facImgSeq;
+    const {dataUrl,resized,w,h}=await resizeImageToMax(file,1920,1080);
+    const sizeLabel=resized?`已压缩至 ${w}×${h}`:`${w}×${h}`;
+    facImages.push({id,name:file.name,size:sizeLabel,dataUrl});
+    renderFacImgGrid();
+  }
+}
+function renderFacImgGrid(){
+  const el=document.getElementById('fac-img-grid');if(!el)return;
+  if(!facImages.length){el.innerHTML='<span class="form-empty-hint">暂无图片</span>';return;}
+  window._facImgCtxTemp=facImages.map(img=>({name:img.name,ext:'jpg',size:img.size,date:'',dataUrl:img.dataUrl}));
+  el.innerHTML=facImages.map((img,idx)=>`<div class="form-img-thumb">
+    <img src="${img.dataUrl}" title="${escHtml(img.name)}" onclick="openPreview({name:'${escHtml(img.name)}',ext:'jpg',size:'${escHtml(img.size)}',date:'',dataUrl:'${img.dataUrl}'})">
+    <div class="form-img-overlay"><button class="form-img-act" onclick="removeFacImg(${img.id})">×</button></div>
+  </div>`).join('');
+}
+function removeFacImg(id){facImages=facImages.filter(x=>x.id!==id);renderFacImgGrid();}
+
+// ── Facility: material upload ──
+async function handleFacMatUpload(ev){
+  const files=Array.from(ev.target.files||[]);ev.target.value='';
+  for(const file of files){
+    const id=++facMatSeq;
+    const parts=file.name.split('.');const ext=parts.length>1?parts[parts.length-1].toLowerCase():'';
+    if(VIDEO_EXTS.includes(ext)){
+      const res=await getVideoResolution(file);
+      if(res&&(res.w>1280||res.h>720)){showToast(`「${file.name}」分辨率超过720P，请先压缩`,'error');continue;}
+    }
+    const reader=new FileReader();
+    reader.onload=e=>{facMaterials.push({id,name:file.name,ext,size:fmtSize(file.size),dataUrl:e.target.result});renderFacMatList();};
+    reader.readAsDataURL(file);
+  }
+}
+function renderFacMatList(){
+  const el=document.getElementById('fac-mat-list');if(!el)return;
+  if(!facMaterials.length){el.innerHTML='<span class="form-empty-hint">暂无资料</span>';return;}
+  el.innerHTML=facMaterials.map((f,idx)=>`<div class="form-mat-item">
+    <div class="form-mat-icon" style="background:${fileBg(f.ext)}">${fileIcon(f.ext)}</div>
+    <div class="form-mat-info">
+      <div class="form-mat-name" title="${escHtml(f.name)}">${escHtml(f.name)}</div>
+      <div class="form-mat-meta">${f.ext.toUpperCase()} · ${f.size}</div>
+    </div>
+    <div class="form-mat-actions">
+      <button class="arch-file-act del" onclick="removeFacMat(${f.id})">删除</button>
+    </div>
+  </div>`).join('');
+}
+function removeFacMat(id){facMaterials=facMaterials.filter(x=>x.id!==id);renderFacMatList();}
+
+// ── Facility: save ──
+function saveFacility(){
+  const projId=parseInt(document.getElementById('fac-project-id').value);
+  const name=(document.getElementById('fac-name').value||'').trim();
+  const lat=parseFloat(document.getElementById('fac-lat').value);
+  const lng=parseFloat(document.getElementById('fac-lng').value);
+  const desc=(qEditors['fac']&&qEditors['fac'].getText().trim())?qEditors['fac'].root.innerHTML:'';
+  let valid=true;clearInvalid();
+  if(!projId||isNaN(projId)){document.getElementById('fac-project-id').classList.add('invalid');valid=false;}
+  if(!name){document.getElementById('fac-name').classList.add('invalid');valid=false;}
+  if(isNaN(lat)||lat<-90||lat>90){document.getElementById('fac-lat').classList.add('invalid');valid=false;}
+  if(isNaN(lng)||lng<-180||lng>180){document.getElementById('fac-lng').classList.add('invalid');valid=false;}
+  if(!valid){showToast('请检查必填项','error');return;}
+  if(editingFacilityId!==null){
+    const f=FACILITIES.find(x=>x.id===editingFacilityId);
+    if(f){Object.assign(f,{projectId:projId,name,lat,lng,desc,images:[...facImages],materials:[...facMaterials]});
+    logAction('edit',`修改设施「${name}」`);dbSave(db.saveFacility(f));
+    refreshFacilityMarker(f);closeModal();openFacilityDetail(f.id);showToast('设施已更新：'+name,'success');}
+  }else{
+    const newF={id:++facilityIdSeq,projectId:projId,name,lat,lng,desc,images:[...facImages],materials:[...facMaterials]};
+    FACILITIES.push(newF);
+    logAction('create',`新建设施「${name}」`);dbSave(db.saveFacility(newF));
+    addFacilityMarker(newF);closeModal();openFacilityDetail(newF.id);showToast('设施已创建：'+name,'success');
+  }
+}
+
+// ── Facility: open edit modal ──
+function openEditFacilityModal(id){
+  const f=FACILITIES.find(x=>x.id===id);if(!f)return;
+  editingFacilityId=id;editingId=null;
+  document.getElementById('modal-tab-bar').style.display='none';
+  document.getElementById('modal-title-edit').style.display='';
+  document.getElementById('modal-title-edit').textContent='编辑设施';
+  document.getElementById('modal-proj-form').style.display='none';
+  document.getElementById('modal-fac-form').style.display='';
+  modalTab='fac';
+  _populateFacilityProjectSelect();
+  document.getElementById('fac-project-id').value=f.projectId;
+  document.getElementById('fac-name').value=f.name;
+  document.getElementById('fac-lat').value=f.lat;
+  document.getElementById('fac-lng').value=f.lng;
+  if(!qEditors['fac']){
+    const toolbar=[[{header:[1,2,false]}],['bold','italic','underline'],[{'list':'ordered'},{'list':'bullet'}],['clean']];
+    qEditors['fac']=new Quill('#quill-editor-fac',{theme:'snow',modules:{toolbar},placeholder:'输入设施描述…'});
+  }
+  if(qEditors['fac'])qEditors['fac'].clipboard.dangerouslyPasteHTML(f.desc||'');
+  facImages=(f.images||[]).map(img=>({...img,id:++facImgSeq}));
+  facMaterials=(f.materials||[]).map(m=>({...m,id:++facMatSeq}));
+  renderFacImgGrid();renderFacMatList();
+  document.getElementById('modal-save-label').textContent='更新设施';
+  clearInvalid();
+  document.getElementById('proj-modal').classList.add('open');
+  setTimeout(()=>document.getElementById('fac-name').focus(),80);
+}
+
+// ── Facility: detail panel ──
+function openFacilityDetail(id){
+  const f=FACILITIES.find(x=>x.id===id);if(!f)return;
+  const proj=PROJECTS.find(p=>p.id===f.projectId);
+  activeProjectId=null;activeFacilityId=id;
+  logAction('view',`查看设施「${f.name}」`);
+  document.getElementById('detail-panel').classList.remove('hidden');
+  document.getElementById('detail-empty').style.display='none';
+  const dc=document.getElementById('detail-content');dc.style.display='flex';
+  window._detailCtx=(f.materials||[]).map(m=>({name:m.name,ext:m.ext,size:m.size,date:'',dataUrl:m.dataUrl||''}));
+  window._detailImgCtx=(f.images||[]).map(img=>({name:img.name,ext:'jpg',size:img.size,date:'',dataUrl:img.dataUrl||''}));
+  const matsHtml=(f.materials&&f.materials.length)?f.materials.map((m,mi)=>`<div class="content-item" onclick="openPreviewInCtx('detail',${mi})"><div class="content-icon icon-doc" style="background:${fileBg(m.ext)}">${fileIcon(m.ext)}</div><div style="min-width:0"><div class="content-item-title">${escHtml(m.name)}</div><div class="content-item-meta">${escHtml(m.ext.toUpperCase()+' · '+m.size)}</div></div></div>`).join(''):`<p style="font-size:13px;color:#B4B2A9;padding:4px 0">暂无资料</p>`;
+  const imgSection=(f.images&&f.images.length)?`<div class="section"><div class="section-title">设施图片 (${f.images.length})</div><div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:4px">${f.images.map((img,ii)=>`<div style="width:70px;height:70px;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--border);cursor:pointer;flex-shrink:0" onclick="openPreviewInCtx('detailImg',${ii})"><img src="${img.dataUrl||''}" style="width:100%;height:100%;object-fit:cover;display:block"></div>`).join('')}</div></div>`:'';
+  const editBtns=(editMode&&can('editProject'))?`<div class="detail-actions"><button class="btn btn-sm" onclick="openEditFacilityModal(${f.id})"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>编辑</button><button class="btn btn-sm btn-danger" onclick="confirmDeleteFacility(${f.id})"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>删除</button></div>`:'';
+  dc.innerHTML=`
+  <div class="detail-header">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+      <div class="detail-project-name">⚙ ${escHtml(f.name)}</div>
+      <button style="background:none;border:none;cursor:pointer;color:#B4B2A9;flex-shrink:0;margin-top:2px" onclick="closeDetail()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    ${proj?`<div style="margin-top:6px;font-size:12px;color:var(--text-secondary)">📍 关联项目：<span style="font-weight:500;color:var(--primary-mid);cursor:pointer;text-decoration:underline" onclick="openDetail(${proj.id})">${escHtml(pName(proj))}</span></div>`:''}
+    ${editBtns}
+  </div>
+  <div class="section">
+    <div class="section-title">设施信息</div>
+    <div class="info-grid"><div class="info-item"><label>坐标</label><span>${f.lat.toFixed(4)}, ${f.lng.toFixed(4)}</span></div></div>
+    ${f.desc?`<div class="desc-html" style="margin-top:10px">${f.desc}</div>`:''}
+  </div>
+  <div class="section" style="flex:1"><div class="section-title">设施资料 (${(f.materials||[]).length})</div><div class="content-list">${matsHtml}</div></div>
+  ${imgSection}`;
+  Object.values(markerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='.5';});
+  Object.values(facilityMarkerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='.5';});
+  if(facilityMarkerLayer[id]){facilityMarkerLayer[id].getElement().style.opacity='1';map.panTo([f.lat,f.lng],{animate:true,duration:.4});}
+}
+
+// ── Facility: delete ──
+function confirmDeleteFacility(id){
+  const f=FACILITIES.find(x=>x.id===id);if(!f)return;
+  showConfirm('删除设施',`删除设施「${f.name}」？此操作不可撤销。`,()=>{
+    logAction('delete',`删除设施「${f.name}」`);
+    dbSave(db.deleteFacility(id));
+    removeFacilityMarker(id);FACILITIES=FACILITIES.filter(x=>x.id!==id);
+    closeDetail();showToast('设施已删除','info');
+  });
+}
 function clearInvalid(){document.querySelectorAll('.form-input,.form-select').forEach(el=>el.classList.remove('invalid'));}
 
 function saveProject(){
@@ -1890,6 +2179,7 @@ function applyPermissionsToUI(){
   filterPins();
   // If detail panel open, refresh it
   if(activeProjectId!==null)openDetail(activeProjectId);
+  else if(activeFacilityId!==null)openFacilityDetail(activeFacilityId);
 }
 
 // ── Demo user switcher ──
@@ -2174,6 +2464,8 @@ function _rebuildMarkers(){
   Object.keys(markerLayer).forEach(id=>removeMarker(parseInt(id)));
   PROJECTS.forEach(p=>addMarker(p));
   updatePinCount();
+  Object.keys(facilityMarkerLayer).forEach(id=>removeFacilityMarker(parseInt(id)));
+  FACILITIES.forEach(f=>addFacilityMarker(f));
   _fitMapToMarkers();
 }
 
@@ -2238,6 +2530,16 @@ async function initDB(){
       LOGS=logRows;
       logIdSeq=Math.max(...logRows.map(l=>l.id),logIdSeq);
     }
+
+    // ── Facilities（项目设施） ──
+    try{
+      const {data:facRows,error:fe}=await _sb.from('facilities').select('*');
+      if(!fe&&facRows&&facRows.length){
+        FACILITIES=facRows.map(r=>({id:r.id,projectId:r.project_id,name:r.name,lat:r.lat,lng:r.lng,desc:r.descr||'',images:typeof r.images==='string'?JSON.parse(r.images):r.images||[],materials:typeof r.materials==='string'?JSON.parse(r.materials):r.materials||[]}));
+        facilityIdSeq=Math.max(...facRows.map(f=>f.id),facilityIdSeq);
+        FACILITIES.forEach(f=>addFacilityMarker(f));
+      }
+    }catch(e){console.warn('facilities 表不存在，使用本地数据（可在 Supabase 中创建表）');}
 
     // ── Arch Categories（几内亚培训资料分类） ──
     try{
