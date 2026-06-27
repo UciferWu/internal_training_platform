@@ -1573,7 +1573,7 @@ function showConfirm(title,msg,cb){
     _confirmCb=cb;
     document.getElementById('confirm-title').textContent=title;
     document.getElementById('confirm-msg').textContent=msg;
-    document.getElementById('confirm-ok-btn').onclick=()=>{closeConfirm();if(_confirmCb)_confirmCb();};
+    document.getElementById('confirm-ok-btn').onclick=()=>{const cb=_confirmCb;closeConfirm();if(cb)cb();};
     const ov=document.getElementById('confirm-overlay');
     ov.classList.add('open');
     ov.style.display='flex'; // 强制显示，避免 CSS 未生效
