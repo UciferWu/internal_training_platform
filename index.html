@@ -2796,18 +2796,42 @@ function _rebuildMarkers(){
 
 async function initDB(){
   try{
+    // 所有读取并行发出，等最慢那个即可（原先串行要 10s，并行约 1-2s）
+    const [
+      {data:projRows},
+      {data:userRows},
+      {data:catRows},
+      {data:wordRows},
+      {data:progRows},
+      {data:statRows},
+      {data:logRows},
+      {data:facRows,   error:fe},
+      {data:archCatRows,error:ace},
+      {data:archFileRows,error:afe},
+      {data:compRows,  error:ce}
+    ] = await Promise.all([
+      _sb.from('projects').select('*'),
+      _sb.from('users').select('*'),
+      _sb.from('fr_categories').select('*').order('id'),
+      _sb.from('fr_words').select('*').order('id'),
+      _sb.from('fr_progress').select('*').eq('user_id',currentUser.id),
+      _sb.from('fr_stats').select('*').eq('user_id',currentUser.id),
+      _sb.from('logs').select('*').order('id',{ascending:false}).limit(300),
+      _sb.from('facilities').select('*'),
+      _sb.from('arch_categories').select('*').order('sort_order'),
+      _sb.from('arch_files').select('*'),
+      _sb.from('competitors').select('*'),
+    ]);
+
     // ── Projects ──
-    const {data:projRows}=await _sb.from('projects').select('*');
     if(projRows&&projRows.length){
       PROJECTS=projRows.map(r=>r.data);
     }else{
-      // 首次运行：将默认数据写入数据库
       await Promise.all(PROJECTS.map(p=>_sb.from('projects').upsert({id:p.id,data:p})));
     }
     _rebuildMarkers();
 
     // ── Users ──
-    const {data:userRows}=await _sb.from('users').select('*');
     if(userRows&&userRows.length){
       USERS=userRows;
       userIdSeq=Math.max(...userRows.map(u=>u.id),userIdSeq);
@@ -2818,7 +2842,6 @@ async function initDB(){
     }
 
     // ── FR Categories ──
-    const {data:catRows}=await _sb.from('fr_categories').select('*').order('id');
     if(catRows&&catRows.length){
       FR_CATEGORIES=catRows;
       FR_CAT_SEQ=Math.max(...catRows.map(c=>c.id),FR_CAT_SEQ);
@@ -2827,7 +2850,6 @@ async function initDB(){
     }
 
     // ── FR Words ──
-    const {data:wordRows}=await _sb.from('fr_words').select('*').order('id');
     if(wordRows&&wordRows.length){
       FR_WORDS=wordRows.map(w=>({...w,catId:w.cat_id,zhApprox:w.zh_approx||''}));
       FR_WORD_SEQ=Math.max(...wordRows.map(w=>w.id),FR_WORD_SEQ);
@@ -2836,70 +2858,55 @@ async function initDB(){
     }
 
     // ── FR Progress（当前用户） ──
-    const {data:progRows}=await _sb.from('fr_progress').select('*').eq('user_id',currentUser.id);
     if(progRows&&progRows.length){
       const s=frStats();
       progRows.forEach(r=>{s.learned[r.word_id]=r.learned_date;});
     }
 
     // ── FR Stats（当前用户积分/连续打卡） ──
-    const {data:statRows}=await _sb.from('fr_stats').select('*').eq('user_id',currentUser.id);
     if(statRows&&statRows.length){
       const s=frStats();const row=statRows[0];
       s.points=row.points||0;s.streak=row.streak||0;s.lastCheckIn=row.last_check_in||null;
     }
 
     // ── Logs（最近 300 条） ──
-    const {data:logRows}=await _sb.from('logs').select('*').order('id',{ascending:false}).limit(300);
     if(logRows&&logRows.length){
       LOGS=logRows;
       logIdSeq=Math.max(...logRows.map(l=>l.id),logIdSeq);
     }
 
     // ── Facilities（项目设施） ──
-    try{
-      const {data:facRows,error:fe}=await _sb.from('facilities').select('*');
-      if(!fe&&facRows&&facRows.length){
-        FACILITIES=facRows.map(r=>({id:Number(r.id),projectId:r.project_id,name:r.name,lat:r.lat,lng:r.lng,desc:r.descr||'',images:typeof r.images==='string'?JSON.parse(r.images):r.images||[],materials:typeof r.materials==='string'?JSON.parse(r.materials):r.materials||[]}));
-        // 过滤掉时间戳级别的 ID（超出 PG integer 范围），只用合理范围的 ID 推算序列号
-        const safeIds=facRows.map(f=>Number(f.id)).filter(id=>id>0&&id<2_000_000_000);
-        facilityIdSeq=safeIds.length?Math.max(...safeIds,facilityIdSeq):facilityIdSeq;
-        FACILITIES.forEach(f=>addFacilityMarker(f));
-      }
-    }catch(e){console.warn('facilities 表不存在，使用本地数据（可在 Supabase 中创建表）');}
+    if(!fe&&facRows&&facRows.length){
+      FACILITIES=facRows.map(r=>({id:Number(r.id),projectId:r.project_id,name:r.name,lat:r.lat,lng:r.lng,desc:r.descr||'',images:typeof r.images==='string'?JSON.parse(r.images):r.images||[],materials:typeof r.materials==='string'?JSON.parse(r.materials):r.materials||[]}));
+      const safeIds=facRows.map(f=>Number(f.id)).filter(id=>id>0&&id<2_000_000_000);
+      facilityIdSeq=safeIds.length?Math.max(...safeIds,facilityIdSeq):facilityIdSeq;
+      FACILITIES.forEach(f=>addFacilityMarker(f));
+    }
 
     // ── Arch Categories（几内亚培训资料分类） ──
-    try{
-      const {data:archCatRows,error:ace}=await _sb.from('arch_categories').select('*').order('sort_order');
-      if(!ace&&archCatRows&&archCatRows.length){
-        CATEGORIES=archCatRows.map(r=>({id:r.id,name:r.name,color:r.color}));
-        archCatIdSeq=Math.max(...archCatRows.map(c=>c.id),archCatIdSeq);
-      }else if(!ace){
-        await Promise.all(CATEGORIES.map((c,i)=>_sb.from('arch_categories').upsert({id:c.id,name:c.name,color:c.color,sort_order:i})));
-      }
-    }catch(e){console.warn('arch_categories 表不存在，使用本地数据（请在 Supabase 中创建表）');}
+    if(!ace&&archCatRows&&archCatRows.length){
+      CATEGORIES=archCatRows.map(r=>({id:r.id,name:r.name,color:r.color}));
+      archCatIdSeq=Math.max(...archCatRows.map(c=>c.id),archCatIdSeq);
+    }else if(!ace&&archCatRows){
+      await Promise.all(CATEGORIES.map((c,i)=>_sb.from('arch_categories').upsert({id:c.id,name:c.name,color:c.color,sort_order:i})));
+    }
 
     // ── Arch Files（几内亚培训资料文件） ──
-    try{
-      const {data:archFileRows,error:afe}=await _sb.from('arch_files').select('*');
-      if(!afe&&archFileRows&&archFileRows.length){
-        FILES=archFileRows.map(r=>({id:r.id,catId:r.cat_id,name:r.name,ext:r.ext,size:r.size,date:r.date,dataUrl:r.data_url||''}));
-        archFileIdSeq=Math.max(...archFileRows.map(f=>f.id),archFileIdSeq);
-      }else if(!afe){
-        await Promise.all(FILES.map(f=>_sb.from('arch_files').upsert({id:f.id,cat_id:f.catId,name:f.name,ext:f.ext,size:f.size,date:f.date,data_url:''})));
-      }
-    }catch(e){console.warn('arch_files 表不存在，使用本地数据（请在 Supabase 中创建表）');}
+    if(!afe&&archFileRows&&archFileRows.length){
+      FILES=archFileRows.map(r=>({id:r.id,catId:r.cat_id,name:r.name,ext:r.ext,size:r.size,date:r.date,dataUrl:r.data_url||''}));
+      archFileIdSeq=Math.max(...archFileRows.map(f=>f.id),archFileIdSeq);
+    }else if(!afe&&archFileRows){
+      await Promise.all(FILES.map(f=>_sb.from('arch_files').upsert({id:f.id,cat_id:f.catId,name:f.name,ext:f.ext,size:f.size,date:f.date,data_url:''})));
+    }
 
     // ── Competitors（竞争对手设施） ──
-    try{
-      const {data:compRows,error:ce}=await _sb.from('competitors').select('*');
-      if(!ce&&compRows&&compRows.length){
-        COMPETITORS=compRows.map(r=>({id:Number(r.id),name:r.name,lat:r.lat,lng:r.lng,desc:r.descr||'',images:typeof r.images==='string'?JSON.parse(r.images):r.images||[],materials:typeof r.materials==='string'?JSON.parse(r.materials):r.materials||[]}));
-        const safeCompIds=compRows.map(c=>Number(c.id)).filter(id=>id>0&&id<2_000_000_000);
-        competitorIdSeq=safeCompIds.length?Math.max(...safeCompIds,competitorIdSeq):competitorIdSeq;
-        COMPETITORS.forEach(c=>addCompetitorMarker(c));
-      }
-    }catch(e){console.warn('competitors 表不存在，使用本地数据（可在 Supabase 中创建表）');}
+    if(!ce&&compRows&&compRows.length){
+      COMPETITORS=compRows.map(r=>({id:Number(r.id),name:r.name,lat:r.lat,lng:r.lng,desc:r.descr||'',images:typeof r.images==='string'?JSON.parse(r.images):r.images||[],materials:typeof r.materials==='string'?JSON.parse(r.materials):r.materials||[]}));
+      const safeCompIds=compRows.map(c=>Number(c.id)).filter(id=>id>0&&id<2_000_000_000);
+      competitorIdSeq=safeCompIds.length?Math.max(...safeCompIds,competitorIdSeq):competitorIdSeq;
+      COMPETITORS.forEach(c=>addCompetitorMarker(c));
+    }
+
   }catch(e){
     console.error('DB init error:',e);
     showToast('数据库连接失败，使用本地数据','error');
