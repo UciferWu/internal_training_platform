@@ -2201,7 +2201,7 @@ async function initDB(){
     }
 
     // ── FR Categories ──
-    const {data:catRows}=await _sb.from('fr_categories').select('*').order('sort_order',{nullsFirst:true}).order('id');
+    const {data:catRows}=await _sb.from('fr_categories').select('*').order('id');
     if(catRows&&catRows.length){
       FR_CATEGORIES=catRows;
       FR_CAT_SEQ=Math.max(...catRows.map(c=>c.id),FR_CAT_SEQ);
@@ -2781,8 +2781,9 @@ function frMoveCatDir(id,dir){
   const idx=FR_CATEGORIES.findIndex(c=>c.id===id);if(idx<0)return;
   if(dir==='up'&&idx>0)[FR_CATEGORIES[idx-1],FR_CATEGORIES[idx]]=[FR_CATEGORIES[idx],FR_CATEGORIES[idx-1]];
   if(dir==='down'&&idx<FR_CATEGORIES.length-1)[FR_CATEGORIES[idx],FR_CATEGORIES[idx+1]]=[FR_CATEGORIES[idx+1],FR_CATEGORIES[idx]];
-  // Save new order to DB
-  FR_CATEGORIES.forEach((c,i)=>dbSave(db.saveFrCat({...c,sort_order:i})));
+  // 只保存 fr_categories 表已有的字段，避免 sort_order 列不存在时报错
+  // 若需跨会话持久化顺序，请在 Supabase 中执行：alter table fr_categories add column sort_order int default 0;
+  FR_CATEGORIES.forEach(c=>dbSave(db.saveFrCat({id:c.id,name:c.name,icon:c.icon,color:c.color})));
   frRenderCatMgr();frRenderCats();
 }
 function frDeleteCategory(id){
