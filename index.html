@@ -149,16 +149,24 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
 .arch-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:60px 20px;color:var(--text-tertiary);}
 .arch-empty p{font-size:13px;text-align:center;line-height:1.6;}
 .arch-file-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;}
-.arch-file-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:12px;display:flex;gap:10px;align-items:flex-start;transition:box-shadow .15s;}
+.arch-file-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:12px;display:flex;gap:10px;align-items:flex-start;transition:box-shadow .15s;min-height:90px;cursor:grab;}
+.arch-file-card:active{cursor:grabbing;}
 .arch-file-card:hover{box-shadow:var(--shadow-sm);}
-.arch-file-icon{width:38px;height:38px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
+.arch-file-card.dg-over{outline:2px solid var(--primary);background:var(--primary-light);}
+.arch-file-icon{width:38px;height:38px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;margin-top:2px;}
 .arch-file-info{flex:1;min-width:0;}
-.arch-file-name{font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:3px;}
+.arch-file-name{font-size:13px;font-weight:500;line-height:1.4;margin-bottom:4px;word-break:break-word;}
+.arch-file-name-input{width:100%;font-size:13px;font-weight:500;border:1px solid var(--primary-mid);border-radius:4px;padding:2px 6px;outline:none;font-family:inherit;margin-bottom:4px;}
 .arch-file-meta{font-size:11px;color:var(--text-secondary);line-height:1.5;}
-.arch-file-actions{display:flex;gap:4px;margin-top:6px;}
+.arch-file-actions{display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;}
 .arch-file-act{height:24px;padding:0 8px;font-size:11px;background:none;border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text-secondary);font-family:inherit;}
 .arch-file-act:hover{background:var(--bg);color:var(--text);}
 .arch-file-act.del:hover{color:var(--red);border-color:#F09595;background:var(--red-light);}
+/* Detail panel material rename + drag */
+.detail-mat-item{cursor:grab;}
+.detail-mat-item:active{cursor:grabbing;}
+.detail-mat-item.dg-over{outline:2px solid var(--primary);background:var(--primary-light);border-radius:var(--radius-md);}
+.detail-mat-rename-input{flex:1;font-size:13px;font-weight:500;border:1px solid var(--primary-mid);border-radius:4px;padding:2px 6px;outline:none;font-family:inherit;}
 
 /* ── Modal shared ── */
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;align-items:center;justify-content:center;}
@@ -1039,6 +1047,8 @@ const db = {
   async saveArchCatsOrder(cats) { await Promise.all(cats.map((c,i)=>_sb.from('arch_categories').upsert({id:c.id,name:c.name,color:c.color,sort_order:i}))); },
   async saveArchFile(f)         { const {error}=await _sb.from('arch_files').upsert({id:f.id,cat_id:f.catId,name:f.name,ext:f.ext,size:f.size,date:f.date,data_url:f.dataUrl||''});if(error)throw error; },
   async deleteArchFile(id)      { const {error}=await _sb.from('arch_files').delete().eq('id',id);if(error)throw error; },
+  // Requires: alter table arch_files add column sort_order int default 0;
+  async saveArchFilesOrder(files){ try{ await Promise.all(files.map((f,i)=>_sb.from('arch_files').update({sort_order:i}).eq('id',f.id))); }catch(e){} },
 };
 // 乐观更新辅助：UI 立即更新，后台存储，失败时提示
 function dbSave(promise){ promise.catch(e=>showToast('数据同步失败：'+e.message,'error')); }
@@ -1153,6 +1163,7 @@ let FILES=[
   {id:10,catId:4,name:'反腐合规培训.pptx',ext:'pptx',size:'3.2 MB',date:'2026-04-05'},
 ];
 let selectedCatId=null,archSearchQ='',archEditingCatId=null,archFileIdSeq=100,archCatIdSeq=10;
+let archEditingFileId=null,_archFileDragId=null;
 
 function getVisibleFiles(){
   let f=selectedCatId===null?FILES:FILES.filter(x=>x.catId===selectedCatId);
@@ -1204,19 +1215,54 @@ function renderFileGrid(){
   }
   // Register arch context for navigation
   window._archCtx=files.map(f=>({name:f.name,ext:f.ext,size:f.size,date:f.date,dataUrl:f.dataUrl||''}));
-  h+=`<div class="arch-file-grid">${files.map((f,fi)=>`
-    <div class="arch-file-card">
+  h+=`<div class="arch-file-grid">${files.map((f,fi)=>{
+    const isEditing=archEditingFileId===f.id;
+    return `<div class="arch-file-card" draggable="true"
+      ondragstart="archFileDragStart(event,${f.id})" ondragend="archFileDragEnd(event)"
+      ondragover="archFileDragOver(event,${f.id})" ondragleave="this.classList.remove('dg-over')"
+      ondrop="archFileDrop(event,${f.id})">
       <div class="arch-file-icon" style="background:${fileBg(f.ext)}">${fileIcon(f.ext)}</div>
       <div class="arch-file-info">
-        <div class="arch-file-name" title="${escHtml(f.name)}">${escHtml(f.name)}</div>
+        ${isEditing
+          ? `<input id="arch-rename-input-${f.id}" class="arch-file-name-input" value="${escHtml(f.name)}"
+              onkeydown="if(event.key==='Enter')finishRenameFile(${f.id});if(event.key==='Escape')cancelRenameFile()"
+              onblur="finishRenameFile(${f.id})">`
+          : `<div class="arch-file-name">${escHtml(f.name)}</div>`}
         <div class="arch-file-meta">${escHtml(f.ext.toUpperCase())} · ${escHtml(f.size)} · ${escHtml(f.date)}</div>
         <div class="arch-file-actions">
           <button class="arch-file-act" onclick="openPreviewInCtx('arch',${fi})">查看</button>
+          ${isEditing
+            ? `<button class="arch-file-act" onclick="cancelRenameFile()">取消</button>`
+            : `<button class="arch-file-act" onclick="startRenameFile(${f.id})">重命名</button>`}
           <button class="arch-file-act del" onclick="confirmDelFile(${f.id})">删除</button>
         </div>
       </div>
-    </div>`).join('')}</div>`;
+    </div>`;
+  }).join('')}</div>`;
   content.innerHTML=h;
+  if(archEditingFileId!==null){const inp=document.getElementById('arch-rename-input-'+archEditingFileId);if(inp){inp.focus();inp.select();}}
+}
+function startRenameFile(id){archEditingFileId=id;renderFileGrid();}
+function cancelRenameFile(){archEditingFileId=null;renderFileGrid();}
+function finishRenameFile(id){
+  if(archEditingFileId!==id)return;
+  const inp=document.getElementById('arch-rename-input-'+id);
+  const name=inp?(inp.value||'').trim():'';
+  if(name){const f=FILES.find(x=>x.id===id);if(f){f.name=name;dbSave(db.saveArchFile(f));}}
+  archEditingFileId=null;renderFileGrid();
+}
+function archFileDragStart(ev,id){_archFileDragId=id;ev.dataTransfer.effectAllowed='move';setTimeout(()=>{ev.target.style.opacity='.45';},0);}
+function archFileDragEnd(ev){_archFileDragId=null;ev.target.style.opacity='';document.querySelectorAll('.arch-file-card').forEach(el=>el.classList.remove('dg-over'));}
+function archFileDragOver(ev,id){ev.preventDefault();ev.dataTransfer.dropEffect='move';if(_archFileDragId===id)return;ev.currentTarget.classList.add('dg-over');}
+function archFileDrop(ev,id){
+  ev.preventDefault();ev.currentTarget.classList.remove('dg-over');
+  if(_archFileDragId===null||_archFileDragId===id)return;
+  const fromFile=FILES.find(f=>f.id===_archFileDragId),toFile=FILES.find(f=>f.id===id);
+  if(!fromFile||!toFile)return;
+  const fi=FILES.indexOf(fromFile),ti=FILES.indexOf(toFile);
+  FILES.splice(fi,1);FILES.splice(ti,0,fromFile);
+  db.saveArchFilesOrder(FILES);
+  renderFileGrid();
 }
 function selectCat(id){selectedCatId=id;archSearchQ='';document.getElementById('arch-search').value='';renderArchive();}
 function archSearch(){archSearchQ=document.getElementById('arch-search').value.trim().toLowerCase();renderFileGrid();}
@@ -1300,6 +1346,8 @@ let FACILITIES=[],facilityIdSeq=2000;
 let modalTab='proj';
 // Facility form state
 let facImages=[],facMaterials=[],facImgSeq=0,facMatSeq=0;
+// Detail panel materials rename/drag state
+let _detailMatRenamingIdx=null,_detailMatDragIdx=null;
 const TYPE_ICON={video:'🎬',doc:'📄',img:'🖼️'};
 const TYPE_CLASS={video:'icon-video',doc:'icon-doc',img:'icon-img'};
 
@@ -1367,18 +1415,15 @@ function openDetail(id){
   if(p.level==='保密'&&!can('viewConfidential')){
     showToast('您没有权限查看保密项目','error');return;
   }
-  activeProjectId=id;activeFacilityId=null;
+  activeProjectId=id;activeFacilityId=null;_detailMatRenamingIdx=null;
   logAction('view',`查看项目「${pName(p)}」`);
   document.getElementById('detail-panel').classList.remove('hidden');
   document.getElementById('detail-empty').style.display='none';
   const dc=document.getElementById('detail-content');dc.style.display='flex';
   const chipHtml=v=>v?`<span class="tag-chip">${escHtml(v)}</span>`:'<span style="font-size:11px;color:var(--text-tertiary)">—</span>';
   const descHtml=pLoc(p)?`<div class="desc-html">${pLoc(p)}</div>`:'<span style="font-size:12px;color:var(--text-tertiary)">—</span>';
-  const allMats=[...(p.contents||[]).map(c=>({type:c.type,title:c.title,meta:c.meta,isContent:true})),...(p.materials||[]).map(m=>({type:'doc',title:m.name,meta:m.ext.toUpperCase()+' · '+m.size,isContent:false,matObj:m}))];
-  // Register contexts for navigation
-  window._detailCtx=allMats.map(c=>c.isContent?{name:c.title,ext:'doc',size:'',date:c.meta}:{name:c.matObj.name,ext:c.matObj.ext,size:c.matObj.size,date:'',dataUrl:c.matObj.dataUrl||''});
+  const allMats=[...(p.contents||[]),...(p.materials||[])];
   window._detailImgCtx=(p.images||[]).map(img=>({name:img.name,ext:'jpg',size:img.size,date:'',dataUrl:img.dataUrl||''}));
-  const contentsHtml=allMats.length===0?`<p style="font-size:13px;color:#B4B2A9;padding:4px 0">暂无项目资料</p>`:allMats.map((c,ci)=>`<div class="content-item" onclick="openPreviewInCtx('detail',${ci})"><div class="content-icon ${TYPE_CLASS[c.type]||'icon-doc'}" style="background:${c.isContent?'':fileBg(c.matObj?c.matObj.ext:'doc')}">${TYPE_ICON[c.type]||fileIcon(c.isContent?'doc':(c.matObj?c.matObj.ext:''))}</div><div style="min-width:0"><div class="content-item-title">${escHtml(c.title)}</div><div class="content-item-meta">${escHtml(c.meta)}</div></div></div>`).join('');
   const imgSection=(p.images&&p.images.length)?`<div class="section"><div class="section-title">项目图片 (${p.images.length})</div><div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:4px">${p.images.map((img,ii)=>`<div style="width:70px;height:70px;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--border);cursor:pointer;flex-shrink:0" onclick="openPreviewInCtx('detailImg',${ii})"><img src="${img.dataUrl||''}" style="width:100%;height:100%;object-fit:cover;display:block"></div>`).join('')}</div></div>`:'';
   const editBtns=(editMode&&can('editProject'))?`<div class="detail-actions"><button class="btn btn-sm" onclick="openEditModal(${p.id})"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>编辑</button><button class="btn btn-sm btn-danger" onclick="confirmDelete(${p.id})"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>删除</button></div>`:'';
   dc.innerHTML=`
@@ -1401,8 +1446,9 @@ function openDetail(id){
     </div>
   </div>
   <div class="section"><div class="section-title">项目描述</div>${descHtml}</div>
-  <div class="section" style="flex:1"><div class="section-title">项目资料 (${allMats.length})</div><div class="content-list">${contentsHtml}</div></div>
+  <div class="section" style="flex:1"><div class="section-title">项目资料 (${allMats.length})</div><div id="detail-mat-section"></div></div>
   ${imgSection}`;
+  renderDetailMatSection();
   // Append facility section if any
   const projFacs=FACILITIES.filter(f=>f.projectId===id);
   if(projFacs.length){
@@ -1415,13 +1461,71 @@ function openDetail(id){
   Object.values(facilityMarkerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='.5';});
   if(markerLayer[id]){markerLayer[id].getElement().style.opacity='1';map.panTo([p.lat,p.lng],{animate:true,duration:.4});}
 }
+function renderDetailMatSection(){
+  const el=document.getElementById('detail-mat-section');if(!el||activeProjectId===null)return;
+  const p=PROJECTS.find(x=>x.id===activeProjectId);if(!p)return;
+  const canEdit=editMode&&can('editProject');
+  const contents=(p.contents||[]).map((c,ci)=>({type:c.type,title:c.title,meta:c.meta,isContent:true,ci}));
+  const mats=(p.materials||[]).map((m,mi)=>({type:'doc',title:m.name,meta:m.ext.toUpperCase()+' · '+m.size,isContent:false,matObj:m,mi}));
+  const allMats=[...contents,...mats];
+  // Build context for preview navigation
+  window._detailCtx=allMats.map(c=>c.isContent?{name:c.title,ext:'doc',size:'',date:c.meta}:{name:c.matObj.name,ext:c.matObj.ext,size:c.matObj.size,date:'',dataUrl:c.matObj.dataUrl||''});
+  if(!allMats.length){el.innerHTML=`<p style="font-size:13px;color:#B4B2A9;padding:4px 0">暂无项目资料</p>`;return;}
+  el.innerHTML=`<div class="content-list">${allMats.map((c,ci)=>{
+    if(c.isContent){
+      return `<div class="content-item" onclick="openPreviewInCtx('detail',${ci})">
+        <div class="content-icon ${TYPE_CLASS[c.type]||'icon-doc'}">${TYPE_ICON[c.type]||'📄'}</div>
+        <div style="min-width:0"><div class="content-item-title">${escHtml(c.title)}</div><div class="content-item-meta">${escHtml(c.meta)}</div></div>
+      </div>`;
+    }
+    const mi=c.mi;const isRenaming=canEdit&&_detailMatRenamingIdx===mi;
+    return `<div class="content-item detail-mat-item"
+      ${canEdit?`draggable="true" ondragstart="detailMatDragStart(event,${mi})" ondragend="detailMatDragEnd(event)" ondragover="detailMatDragOver(event,${mi})" ondragleave="this.classList.remove('dg-over')" ondrop="detailMatDrop(event,${mi})"`:''}>
+      <div class="content-icon icon-doc" style="background:${fileBg(c.matObj.ext)};cursor:pointer;flex-shrink:0" onclick="openPreviewInCtx('detail',${ci})">${fileIcon(c.matObj.ext)}</div>
+      <div style="min-width:0;flex:1;display:flex;flex-direction:column;justify-content:center">
+        ${isRenaming
+          ? `<input id="detail-mat-rename-${mi}" class="detail-mat-rename-input" value="${escHtml(c.matObj.name)}"
+              onkeydown="if(event.key==='Enter')finishDetailMatRename(${mi});if(event.key==='Escape'){_detailMatRenamingIdx=null;renderDetailMatSection();}"
+              onblur="finishDetailMatRename(${mi})">`
+          : `<div class="content-item-title" style="cursor:pointer" onclick="openPreviewInCtx('detail',${ci})">${escHtml(c.title)}</div>`}
+        <div class="content-item-meta">${escHtml(c.meta)}</div>
+      </div>
+      ${canEdit&&!isRenaming?`<button class="arch-file-act" style="flex-shrink:0;margin-left:4px" onclick="startDetailMatRename(${mi})">重命名</button>`:''}
+    </div>`;
+  }).join('')}</div>`;
+  if(_detailMatRenamingIdx!==null){const inp=document.getElementById('detail-mat-rename-'+_detailMatRenamingIdx);if(inp){inp.focus();inp.select();}}
+}
+function startDetailMatRename(mi){_detailMatRenamingIdx=mi;renderDetailMatSection();}
+function finishDetailMatRename(mi){
+  if(_detailMatRenamingIdx!==mi)return;
+  const inp=document.getElementById('detail-mat-rename-'+mi);
+  const name=inp?(inp.value||'').trim():'';
+  if(name&&activeProjectId!==null){
+    const p=PROJECTS.find(x=>x.id===activeProjectId);
+    if(p&&p.materials&&p.materials[mi]){p.materials[mi].name=name;dbSave(db.saveProject(p));}
+  }
+  _detailMatRenamingIdx=null;renderDetailMatSection();
+}
+function detailMatDragStart(ev,mi){_detailMatDragIdx=mi;ev.dataTransfer.effectAllowed='move';setTimeout(()=>{ev.currentTarget&&(ev.currentTarget.style.opacity='.45');},0);}
+function detailMatDragEnd(ev){_detailMatDragIdx=null;ev.currentTarget.style.opacity='';document.querySelectorAll('.detail-mat-item').forEach(el=>el.classList.remove('dg-over'));}
+function detailMatDragOver(ev,mi){ev.preventDefault();ev.dataTransfer.dropEffect='move';if(_detailMatDragIdx===mi)return;ev.currentTarget.classList.add('dg-over');}
+function detailMatDrop(ev,mi){
+  ev.preventDefault();ev.currentTarget.classList.remove('dg-over');
+  if(_detailMatDragIdx===null||_detailMatDragIdx===mi)return;
+  const p=PROJECTS.find(x=>x.id===activeProjectId);if(!p||!p.materials)return;
+  const from=_detailMatDragIdx,to=mi;
+  const [item]=p.materials.splice(from,1);
+  p.materials.splice(to,0,item);
+  dbSave(db.saveProject(p));
+  _detailMatDragIdx=null;renderDetailMatSection();
+}
 function closeDetail(){
   document.getElementById('detail-panel').classList.add('hidden');
   document.getElementById('detail-empty').style.display='flex';
   document.getElementById('detail-content').style.display='none';
   Object.values(markerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='1';});
   Object.values(facilityMarkerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='1';});
-  activeProjectId=null;activeFacilityId=null;
+  activeProjectId=null;activeFacilityId=null;_detailMatRenamingIdx=null;
 }
 
 // ══════════════════════════════════════════════════════
