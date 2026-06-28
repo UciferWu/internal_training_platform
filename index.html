@@ -460,6 +460,11 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
 .fr-vocab-ph{font-size:12px;color:var(--text-secondary);font-style:italic;}
 .fr-vocab-cat{background:var(--primary-light);color:var(--primary);border-radius:99px;padding:2px 10px;font-size:11px;font-weight:500;text-align:center;}
 .fr-vocab-acts{display:flex;gap:6px;justify-content:flex-end;}
+.fr-home-result-item{display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:6px;cursor:default;}
+.fr-home-result-fr{font-weight:600;font-size:14px;min-width:100px;}
+.fr-home-result-zh{color:var(--text-secondary);font-size:13px;min-width:80px;}
+.fr-home-result-ph{font-size:12px;color:var(--text-tertiary);font-style:italic;flex:1;}
+.fr-home-result-cat{background:var(--primary-light);color:var(--primary);border-radius:99px;padding:2px 8px;font-size:11px;font-weight:500;white-space:nowrap;}
 .fr-vocab-pag{display:flex;align-items:center;gap:6px;padding:10px 0 6px;flex-wrap:wrap;}
 .fr-vocab-pag .btn{min-width:32px;padding:4px 8px;font-size:13px;}
 .fr-vocab-pag-info{font-size:12px;color:var(--text-tertiary);margin-left:4px;}
@@ -915,11 +920,17 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
     <button class="btn fr-checkin-btn" id="fr-checkin-btn" onclick="frCheckIn()">📅 每日打卡</button>
   </div>
 
-  <!-- Home: stats strip + categories -->
+  <!-- Home: stats strip + search + categories -->
   <div class="fr-tab" id="fr-tab-home">
     <div class="fr-stats-strip" id="fr-stats-strip"></div>
-    <div class="fr-section-title">选择词库类别</div>
-    <div class="fr-cat-grid" id="fr-cat-grid"></div>
+    <div style="padding:12px 16px 0">
+      <input class="search-input" id="fr-home-search" placeholder="搜索词汇（法语或中文）…" oninput="frHomeSearch()" style="width:100%;max-width:420px">
+    </div>
+    <div id="fr-home-search-results" style="display:none;padding:8px 16px 0"></div>
+    <div id="fr-home-cats-section">
+      <div class="fr-section-title">选择词库类别</div>
+      <div class="fr-cat-grid" id="fr-cat-grid"></div>
+    </div>
   </div>
 
   <!-- Learn: flashcard -->
@@ -3158,6 +3169,34 @@ function renderFrench(){
 // ══════════════════════════════════════════════════════
 //  French — Stats Bar
 // ══════════════════════════════════════════════════════
+function frHomeSearch(){
+  const q=(document.getElementById('fr-home-search').value||'').trim().toLowerCase();
+  const resultsEl=document.getElementById('fr-home-search-results');
+  const catsEl=document.getElementById('fr-home-cats-section');
+  if(!q){resultsEl.style.display='none';resultsEl.innerHTML='';catsEl.style.display='';return;}
+  catsEl.style.display='none';
+  const matches=FR_WORDS.filter(w=>w.fr.toLowerCase().includes(q)||w.zh.includes(q)||(w.zhApprox||'').includes(q));
+  if(!matches.length){
+    resultsEl.style.display='';
+    resultsEl.innerHTML='<div style="color:var(--text-tertiary);padding:12px 0">未找到匹配词汇</div>';
+    return;
+  }
+  resultsEl.style.display='';
+  resultsEl.innerHTML=`<div style="font-size:12px;color:var(--text-tertiary);margin-bottom:8px">找到 ${matches.length} 个词汇</div>`+
+    matches.map(w=>{
+      const cat=FR_CATEGORIES.find(c=>c.id===w.catId);
+      const ph=w.phonetic||'';
+      const approx=w.zhApprox?` ≈ ${w.zhApprox}`:'';
+      return `<div class="fr-home-result-item">
+        <div class="fr-home-result-fr">${escHtml(w.fr)}</div>
+        <div class="fr-home-result-zh">${escHtml(w.zh)}</div>
+        <div class="fr-home-result-ph">${escHtml(ph)}${escHtml(approx)}</div>
+        ${cat?`<span class="fr-home-result-cat">${escHtml(cat.name)}</span>`:''}
+        <button class="fr-speak-btn-dark" onclick="frSpeak('${escHtml(w.fr).replace(/'/g,"\\'")}')">🔊</button>
+      </div>`;
+    }).join('');
+}
+
 function frRenderStats(){
   const s=frStats();
   const learnedCount=Object.keys(s.learned).length;
@@ -3229,7 +3268,12 @@ function frSwitchTab(tab){
     const btn=document.getElementById('fr-nav-'+t);if(btn)btn.classList.toggle('active',t===tab);
   });
   if(tab==='vocab'){renderFrVocab();frRenderCatMgr();}
-  if(tab==='home'){frRenderStats();frRenderCats();}
+  if(tab==='home'){frRenderStats();frRenderCats();
+    // 清空搜索框，恢复类别显示
+    const hs=document.getElementById('fr-home-search');if(hs)hs.value='';
+    const hr=document.getElementById('fr-home-search-results');if(hr){hr.style.display='none';hr.innerHTML='';}
+    const hc=document.getElementById('fr-home-cats-section');if(hc)hc.style.display='';
+  }
 }
 
 // ══════════════════════════════════════════════════════
@@ -3587,6 +3631,12 @@ function renderFrVocab(){
     <button class="btn btn-sm"${page>=totalPages?' disabled':''} onclick="frVocabGo(${page+1})">下一页 ›</button>
     <button class="btn btn-sm"${page>=totalPages?' disabled':''} onclick="frVocabGo(${totalPages})">»</button>
     <span class="fr-vocab-pag-info">共 ${words.length} 词，第 ${(page-1)*PAGE_SIZE+1}–${Math.min(page*PAGE_SIZE,words.length)} 条</span>
+    <span style="display:flex;align-items:center;gap:4px;margin-left:6px;font-size:13px;color:var(--text-secondary)">
+      跳至
+      <input type="number" min="1" max="${totalPages}" style="width:52px;padding:3px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;background:var(--bg);color:var(--text);text-align:center"
+        placeholder="${page}" onkeydown="if(event.key==='Enter'){const v=parseInt(this.value);if(v>=1&&v<=${totalPages})frVocabGo(v);this.value='';}" onblur="const v=parseInt(this.value);if(v>=1&&v<=${totalPages})frVocabGo(v);this.value='';">
+      页
+    </span>
   </div>`;
 
   el.innerHTML=pagHtml+pageWords.map(w=>{
