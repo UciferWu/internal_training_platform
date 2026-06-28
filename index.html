@@ -1055,9 +1055,15 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
     <div class="fr-word-form" id="fr-word-form" style="display:none">
       <div class="fr-word-form-title" id="fr-word-form-title">添加词汇</div>
       <div class="fr-word-form-grid">
-        <div class="form-group">
+        <div class="form-group" style="grid-column:1/-1">
           <label class="form-label">法语单词<span class="req">*</span></label>
-          <input class="form-input" id="frw-fr" placeholder="ex. Bonjour">
+          <div style="display:flex;gap:8px;align-items:center">
+            <input class="form-input" id="frw-fr" placeholder="ex. Bonjour" style="flex:1">
+            <button class="btn btn-primary" id="frw-gen-btn" onclick="frAutoGenerate()" title="根据法语单词自动生成其余字段">
+              ✨ 自动生成
+            </button>
+          </div>
+          <div id="frw-gen-status" style="font-size:12px;color:var(--text-secondary);margin-top:4px;display:none"></div>
         </div>
         <div class="form-group">
           <label class="form-label">中文释义<span class="req">*</span></label>
@@ -2874,7 +2880,7 @@ async function initDB(){
       _sb.from('projects').select('*'),
       _sb.from('users').select('*'),
       _sb.from('fr_categories').select('*').order('id'),
-      _sb.from('fr_words').select('*').order('id'),
+      _sb.from('fr_words').select('*').order('id').limit(10000),
       _sb.from('fr_progress').select('*').eq('user_id',currentUser.id),
       _sb.from('fr_stats').select('*').eq('user_id',currentUser.id),
       _sb.from('logs').select('*').order('id',{ascending:false}).limit(300),
@@ -3729,6 +3735,36 @@ function renderFrVocab(){
   }).join('');
 }
 function frVocabGo(page){frVocabPage=page;renderFrVocab();}
+
+// ── 自动生成：调 Supabase Edge Function（内部调 Claude API）──
+async function frAutoGenerate(){
+  const frWord=(document.getElementById('frw-fr').value||'').trim();
+  if(!frWord){showToast('请先输入法语单词','error');return;}
+  const btn=document.getElementById('frw-gen-btn');
+  const statusEl=document.getElementById('frw-gen-status');
+  btn.disabled=true;btn.textContent='⏳ 生成中…';
+  statusEl.style.display='';statusEl.textContent='正在调用 AI 生成，请稍候…';
+  try{
+    const res=await fetch('https://ropewyrekctxoxchcuzv.supabase.co/functions/v1/fr-word-gen',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({word:frWord})
+    });
+    const data=await res.json();
+    if(!res.ok||data.error) throw new Error(data.error||'生成失败');
+    if(data.zh)      document.getElementById('frw-zh').value=data.zh;
+    if(data.phonetic)document.getElementById('frw-phonetic').value=data.phonetic;
+    if(data.zhApprox)document.getElementById('frw-approx').value=data.zhApprox;
+    if(data.example) document.getElementById('frw-example').value=data.example;
+    statusEl.textContent='✅ 生成完成，可手动调整后保存';
+    statusEl.style.color='var(--success,#51cf66)';
+  }catch(e){
+    statusEl.textContent='❌ '+e.message;
+    statusEl.style.color='var(--danger)';
+  }finally{
+    btn.disabled=false;btn.textContent='✨ 自动生成';
+  }
+}
 
 function frOpenAddWord(){
   if(!can('uploadFiles')){showToast('您没有权限管理词库','error');return;}
