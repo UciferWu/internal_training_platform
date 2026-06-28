@@ -2873,6 +2873,7 @@ function _rebuildMarkers(){
 }
 
 async function initDB(){
+  if(!currentUser) throw new Error('initDB called before user is set');
   try{
     // 所有读取并行发出，等最慢那个即可（原先串行要 10s，并行约 1-2s）
     const [
@@ -3083,13 +3084,14 @@ function _refreshQRCode(){
 // ── 主认证流程 ──
 async function initWeComSSO(){
   if(!WECOM_SSO.enabled){
-    // 开发模式：直接使用默认用户，跳过认证
-    logAction('login',`用户「${currentUser.name}」登录系统（开发模式）`);
+    // 开发模式：若无已登录用户，使用临时管理员账号
+    if(!currentUser) currentUser={id:1,name:'开发管理员',role:'admin',initials:'管理',email:'dev@local',status:'active'};
     try{ await initDB(); }catch(e){
       console.warn('DB加载失败:',e.message);
       document.getElementById('loading-overlay').classList.add('hidden');
       switchView(currentView);
     }
+    logAction('login',`用户「${currentUser.name}」登录系统（开发模式）`);
     applyPermissionsToUI();
     return;
   }
