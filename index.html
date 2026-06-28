@@ -2880,7 +2880,18 @@ async function initDB(){
       _sb.from('projects').select('*'),
       _sb.from('users').select('*'),
       _sb.from('fr_categories').select('*').order('id'),
-      _sb.from('fr_words').select('*').order('id').limit(10000),
+      (async()=>{
+        // Supabase max_rows 默认1000，分批拉取到无数据为止
+        let all=[],from=0;
+        while(true){
+          const {data,error}=await _sb.from('fr_words').select('*').order('id').range(from,from+999);
+          if(error||!data?.length)break;
+          all=all.concat(data);
+          if(data.length<1000)break;
+          from+=1000;
+        }
+        return {data:all};
+      })(),
       _sb.from('fr_progress').select('*').eq('user_id',currentUser.id),
       _sb.from('fr_stats').select('*').eq('user_id',currentUser.id),
       _sb.from('logs').select('*').order('id',{ascending:false}).limit(300),
