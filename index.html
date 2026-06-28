@@ -460,6 +460,9 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
 .fr-vocab-ph{font-size:12px;color:var(--text-secondary);font-style:italic;}
 .fr-vocab-cat{background:var(--primary-light);color:var(--primary);border-radius:99px;padding:2px 10px;font-size:11px;font-weight:500;text-align:center;}
 .fr-vocab-acts{display:flex;gap:6px;justify-content:flex-end;}
+.fr-vocab-pag{display:flex;align-items:center;gap:6px;padding:10px 0 6px;flex-wrap:wrap;}
+.fr-vocab-pag .btn{min-width:32px;padding:4px 8px;font-size:13px;}
+.fr-vocab-pag-info{font-size:12px;color:var(--text-tertiary);margin-left:4px;}
 .fr-word-form{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;margin-top:16px;}
 .fr-word-form-title{font-size:15px;font-weight:600;margin-bottom:16px;}
 .fr-word-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;}
@@ -986,13 +989,14 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
   <!-- Vocab management -->
   <div class="fr-tab" id="fr-tab-vocab" style="display:none">
     <div class="fr-vocab-toolbar">
-      <select class="filter-select" id="fr-vocab-filter" onchange="renderFrVocab()" style="width:140px">
+      <select class="filter-select" id="fr-vocab-filter" onchange="frVocabPage=1;renderFrVocab()" style="width:140px">
         <option value="">全部类别</option>
       </select>
-      <input class="search-input" id="fr-vocab-search" placeholder="搜索词汇…" oninput="renderFrVocab()" style="width:200px">
+      <input class="search-input" id="fr-vocab-search" placeholder="搜索词汇…" oninput="frVocabPage=1;renderFrVocab()" style="width:200px">
       <div style="flex:1"></div>
-      <input type="file" id="fr-import-input" accept=".csv,.tsv,.txt" style="display:none" onchange="frHandleImport(this)">
-      <button class="btn" id="fr-import-btn" onclick="document.getElementById('fr-import-input').click()">📥 导入CSV</button>
+      <input type="file" id="fr-import-input" accept=".xlsx" style="display:none" onchange="frHandleImport(this)">
+      <button class="btn" onclick="frDownloadTemplate()">📄 下载导入模板</button>
+      <button class="btn" id="fr-import-btn" onclick="document.getElementById('fr-import-input').click()">📥 导入Excel</button>
       <button class="btn btn-primary" id="fr-add-word-btn" onclick="frOpenAddWord()">+ 添加词汇</button>
     </div>
     <div class="fr-vocab-list" id="fr-vocab-list"></div>
@@ -1061,6 +1065,7 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
 <div class="toast-wrap" id="toast-wrap"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
@@ -1096,8 +1101,8 @@ const db = {
   async saveFrStats(uid,s)      { const {error}=await _sb.from('fr_stats').upsert({user_id:uid,points:s.points,streak:s.streak,last_check_in:s.lastCheckIn});if(error)throw error; },
   async insertLog(log)          { await _sb.from('logs').insert({user_id:log.userId,action:log.action,detail:log.detail,time:log.time,ip:log.ip}); },
   // 项目设施持久化（需先在 Supabase SQL 编辑器中运行）：
-  // create table if not exists facilities (id bigint primary key, project_id int, name text, lat float, lng float, descr text, images jsonb default '[]', materials jsonb default '[]');
-  // 若已存在旧表（id 为 int），请执行：alter table facilities alter column id type bigint;
+  // create table if not exists facilities (id bigint primary key, project_id bigint, name text, lat float, lng float, descr text, images jsonb default '[]', materials jsonb default '[]');
+  // 若已存在旧表，请执行：alter table facilities alter column id type bigint; alter table facilities alter column project_id type bigint;
   async saveFacility(f)   { const {error}=await _sb.from('facilities').upsert({id:f.id,project_id:f.projectId,name:f.name,lat:f.lat,lng:f.lng,descr:f.desc||'',images:JSON.stringify(f.images||[]),materials:JSON.stringify(f.materials||[])});if(error)throw error; },
   async deleteFacility(id){ const {error}=await _sb.from('facilities').delete().eq('id',id);if(error)throw error; },
   // 竞争对手设施持久化（需先在 Supabase SQL 编辑器中运行）：
@@ -1113,7 +1118,7 @@ const db = {
   async saveArchFile(f)         { const {error}=await _sb.from('arch_files').upsert({id:f.id,cat_id:f.catId,name:f.name,ext:f.ext,size:f.size,date:f.date,data_url:f.dataUrl||''});if(error)throw error; },
   async deleteArchFile(id)      { const {error}=await _sb.from('arch_files').delete().eq('id',id);if(error)throw error; },
   // Requires: alter table arch_files add column sort_order int default 0;
-  async saveArchFilesOrder(files){ try{ await Promise.all(files.map((f,i)=>_sb.from('arch_files').update({sort_order:i}).eq('id',f.id))); }catch(e){} },
+  async saveArchFilesOrder(files){ const res=await Promise.all(files.map((f,i)=>_sb.from('arch_files').update({sort_order:i}).eq('id',f.id)));const err=res.find(r=>r.error);if(err)throw err.error; },
 };
 // 乐观更新辅助：UI 立即更新，后台存储，失败时提示
 function dbSave(promise){ promise.catch(e=>showToast('数据同步失败：'+e.message,'error')); }
@@ -1326,7 +1331,7 @@ function archFileDrop(ev,id){
   if(!fromFile||!toFile)return;
   const fi=FILES.indexOf(fromFile),ti=FILES.indexOf(toFile);
   FILES.splice(fi,1);FILES.splice(ti,0,fromFile);
-  db.saveArchFilesOrder(FILES);
+  dbSave(db.saveArchFilesOrder(FILES));
   renderFileGrid();
 }
 function selectCat(id){selectedCatId=id;archSearchQ='';document.getElementById('arch-search').value='';renderArchive();}
@@ -2819,7 +2824,7 @@ async function initDB(){
       _sb.from('logs').select('*').order('id',{ascending:false}).limit(300),
       _sb.from('facilities').select('*'),
       _sb.from('arch_categories').select('*').order('sort_order'),
-      _sb.from('arch_files').select('*'),
+      _sb.from('arch_files').select('*').order('sort_order'),
       _sb.from('competitors').select('*'),
     ]);
 
@@ -3132,6 +3137,7 @@ let frSessionKnown=0;
 let frSessionTotal=0;
 let frCardFlipped=false;
 let frEditingWordId=null;
+let frVocabPage=Infinity; // Infinity = 默认显示最后一页
 let frShuffleMode=true;
 let frNewCatIcon='💬';
 
@@ -3566,8 +3572,24 @@ function renderFrVocab(){
   });
   const canEdit=can('uploadFiles');
   const el=document.getElementById('fr-vocab-list');
-  if(!words.length){el.innerHTML='<div style="color:var(--text-tertiary);padding:20px;text-align:center">暂无词汇</div>';return;}
-  el.innerHTML=words.map(w=>{
+  if(!words.length){el.innerHTML='<div style="color:var(--text-tertiary);padding:20px;text-align:center">暂无词汇</div>';frVocabPage=Infinity;return;}
+
+  const PAGE_SIZE=10;
+  const totalPages=Math.ceil(words.length/PAGE_SIZE)||1;
+  const page=Math.min(Math.max(1,isFinite(frVocabPage)?frVocabPage:totalPages),totalPages);
+  frVocabPage=page;
+  const pageWords=words.slice((page-1)*PAGE_SIZE,page*PAGE_SIZE);
+
+  const pagHtml=`<div class="fr-vocab-pag">
+    <button class="btn btn-sm"${page<=1?' disabled':''} onclick="frVocabGo(1)">«</button>
+    <button class="btn btn-sm"${page<=1?' disabled':''} onclick="frVocabGo(${page-1})">‹ 上一页</button>
+    <span style="font-size:13px;color:var(--text-secondary);padding:0 4px">${page} / ${totalPages}</span>
+    <button class="btn btn-sm"${page>=totalPages?' disabled':''} onclick="frVocabGo(${page+1})">下一页 ›</button>
+    <button class="btn btn-sm"${page>=totalPages?' disabled':''} onclick="frVocabGo(${totalPages})">»</button>
+    <span class="fr-vocab-pag-info">共 ${words.length} 词，第 ${(page-1)*PAGE_SIZE+1}–${Math.min(page*PAGE_SIZE,words.length)} 条</span>
+  </div>`;
+
+  el.innerHTML=pagHtml+pageWords.map(w=>{
     const cat=FR_CATEGORIES.find(c=>c.id===w.catId);
     return `<div class="fr-vocab-row">
       <div>
@@ -3585,6 +3607,7 @@ function renderFrVocab(){
     </div>`;
   }).join('');
 }
+function frVocabGo(page){frVocabPage=page;renderFrVocab();}
 
 function frOpenAddWord(){
   if(!can('uploadFiles')){showToast('您没有权限管理词库','error');return;}
@@ -3628,6 +3651,7 @@ function frSaveWord(){
     FR_WORDS.push(newW);
     logAction('upload',`添加词汇「${fr}」`);
     dbSave(db.saveFrWord(newW));
+    frVocabPage=Infinity; // 新词添加到末尾，跳到最后一页
   }
   frCloseWordForm();renderFrVocab();frRenderCats();
   showToast(frEditingWordId?'词汇已更新':'词汇已添加','success');
@@ -3654,38 +3678,59 @@ function frCloseWordForm(){
 // ══════════════════════════════════════════════════════
 // Expected CSV columns (header optional):
 // 法语, 中文, 音标, 近似读音, 例句, 类别名
+function frDownloadTemplate(){
+  if(typeof XLSX==='undefined'){showToast('XLSX库未加载，请刷新重试','error');return;}
+  const catNames=FR_CATEGORIES.map(c=>c.name).join(' / ')||'日常用语';
+  const data=[
+    ['法语','中文','音标','中文近似读音','例句','类别'],
+    ['Bonjour','你好','bɔ̃ʒuʁ','蹦-茹','Bonjour! — 你好！',FR_CATEGORIES[0]?.name||'日常用语'],
+    ['Merci','谢谢','mɛʁsi','马尔-西','Merci beaucoup! — 非常感谢！',FR_CATEGORIES[0]?.name||'日常用语'],
+  ];
+  const ws=XLSX.utils.aoa_to_sheet(data);
+  // Set column widths
+  ws['!cols']=[{wch:18},{wch:12},{wch:14},{wch:18},{wch:36},{wch:16}];
+  // Add a note row for category names
+  const noticeRow=data.length+1;
+  XLSX.utils.sheet_add_aoa(ws,[[`【类别可填写：${catNames}】`]],{origin:`A${noticeRow}`});
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'词汇导入模板');
+  XLSX.writeFile(wb,'法语词汇导入模板.xlsx');
+}
+
 function frHandleImport(input){
   if(!can('uploadFiles')){showToast('您没有权限导入词库','error');input.value='';return;}
   const file=input.files[0];input.value='';
   if(!file)return;
+  if(typeof XLSX==='undefined'){showToast('XLSX库未加载，请刷新重试','error');return;}
   const reader=new FileReader();
   reader.onload=e=>{
-    const text=e.target.result;
-    const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-    let imported=0,skipped=0;
-    lines.forEach((line,li)=>{
-      // Support comma or tab delimiter
-      const cols=line.includes('\t')?line.split('\t'):line.split(',');
-      const clean=cols.map(c=>c.trim().replace(/^["']|["']$/g,''));
-      const [frW,zhW,phonetic,zhApprox,example,catName]=clean;
-      // Skip header row
-      if(li===0&&(frW==='法语'||frW.toLowerCase()==='fr'||frW.toLowerCase()==='french'))return;
-      if(!frW||!zhW){skipped++;return;}
-      // Find or use first category
-      let catId=1;
-      if(catName){
-        const cat=FR_CATEGORIES.find(c=>c.name===catName.trim());
-        if(cat)catId=cat.id;
-      }
-      FR_WORDS.push({id:++FR_WORD_SEQ,catId,fr:frW,zh:zhW,phonetic:phonetic||'',zhApprox:zhApprox||'',example:example||''});
-      imported++;
-    });
-    renderFrVocab();frRenderCats();frRenderStats();
-    logAction('upload',`CSV导入 ${imported} 个词汇`);
-    if(imported>0) dbSave(db.saveFrWordsBatch(FR_WORDS.slice(-imported)));
-    showToast(`成功导入 ${imported} 个词汇${skipped?`，跳过 ${skipped} 行`:''}`, 'success');
+    try{
+      const data=new Uint8Array(e.target.result);
+      const wb=XLSX.read(data,{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+      let imported=0,skipped=0;
+      rows.forEach((cols,li)=>{
+        const [frW,zhW,phonetic,zhApprox,example,catName]=cols.map(c=>String(c||'').trim());
+        // 跳过表头行
+        if(li===0&&(frW==='法语'||frW.toLowerCase()==='fr'||frW.toLowerCase()==='french'))return;
+        if(!frW||!zhW){if(frW||zhW)skipped++;return;}
+        let catId=FR_CATEGORIES[0]?.id||1;
+        if(catName){const cat=FR_CATEGORIES.find(c=>c.name===catName.trim());if(cat)catId=cat.id;}
+        FR_WORDS.push({id:++FR_WORD_SEQ,catId,fr:frW,zh:zhW,phonetic:phonetic||'',zhApprox:zhApprox||'',example:example||''});
+        imported++;
+      });
+      frVocabPage=Infinity; // 跳到最后一页显示新导入的词
+      renderFrVocab();frRenderCats();frRenderStats();
+      logAction('upload',`Excel导入 ${imported} 个词汇`);
+      if(imported>0)dbSave(db.saveFrWordsBatch(FR_WORDS.slice(-imported)));
+      showToast(`成功导入 ${imported} 个词汇${skipped?`，跳过 ${skipped} 行`:''}`, 'success');
+    }catch(err){
+      console.error('Excel解析失败:',err);
+      showToast('Excel文件解析失败，请使用下载的模板格式','error');
+    }
   };
-  reader.readAsText(file,'UTF-8');
+  reader.readAsArrayBuffer(file);
 }
 </script>
 </body>
