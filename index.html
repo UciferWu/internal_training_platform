@@ -1448,13 +1448,13 @@ async function handleUpload(ev){
   const rawFiles=Array.from(ev.target.files||[]);if(!rawFiles.length)return;
   const catId=selectedCatId!==null?selectedCatId:(CATEGORIES[0]||{id:-1}).id;
   const d=new Date();const date=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  showToast('上传中…','info');
   for(const file of rawFiles){
     const parts=file.name.split('.');const ext=parts.length>1?parts[parts.length-1].toLowerCase():'';
     const size=fmtSize(file.size);
-    // 读取文件内容用于预览（超过50MB的文件跳过）
     let dataUrl='';
     if(file.size<50*1024*1024){
-      try{dataUrl=await new Promise(res=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=()=>res('');r.readAsDataURL(file);});}catch(e){}
+      try{dataUrl=await _uploadToStorage(file,'arch-files');}catch(e){console.error('上传失败:',e);showToast('「'+file.name+'」上传失败：'+e.message,'error');}
     }
     const newFile={id:++archFileIdSeq,catId,name:file.name,ext,size,date,dataUrl};
     FILES.push(newFile);
@@ -1735,6 +1735,48 @@ function resizeImageToMax(file, maxW, maxH){
   });
 }
 
+// ── Supabase Storage 上传工具 ──
+const _STORAGE_BUCKET='app-files';
+function _genStoragePath(folder,filename){
+  const ext=filename.includes('.')?filename.split('.').pop().toLowerCase():'bin';
+  const uid=Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  return `${folder}/${uid}.${ext}`;
+}
+async function _uploadToStorage(file,folder){
+  const path=_genStoragePath(folder,file.name);
+  const{error}=await _sb.storage.from(_STORAGE_BUCKET).upload(path,file,{cacheControl:'31536000',upsert:false});
+  if(error)throw error;
+  return _sb.storage.from(_STORAGE_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+// Resize image to blob (JPEG), then upload to Storage; returns {url,w,h,resized}
+async function _uploadImageToStorage(file,folder,maxW=1920,maxH=1080){
+  const{blob,w,h,resized}=await new Promise(resolve=>{
+    const img=new Image();const blobUrl=URL.createObjectURL(file);
+    img.onload=()=>{
+      URL.revokeObjectURL(blobUrl);
+      const{naturalWidth:iw,naturalHeight:ih}=img;
+      const canvas=document.createElement('canvas');
+      if(iw<=maxW&&ih<=maxH){
+        canvas.width=iw;canvas.height=ih;
+        canvas.getContext('2d').drawImage(img,0,0);
+        canvas.toBlob(b=>resolve({blob:b,w:iw,h:ih,resized:false}),'image/jpeg',0.9);
+      }else{
+        const r=Math.min(maxW/iw,maxH/ih);
+        const nw=Math.round(iw*r),nh=Math.round(ih*r);
+        canvas.width=nw;canvas.height=nh;
+        canvas.getContext('2d').drawImage(img,0,0,nw,nh);
+        canvas.toBlob(b=>resolve({blob:b,w:nw,h:nh,resized:true}),'image/jpeg',0.85);
+      }
+    };
+    img.onerror=()=>{URL.revokeObjectURL(blobUrl);resolve({blob:file,w:0,h:0,resized:false});};
+    img.src=blobUrl;
+  });
+  const ext=resized?'jpg':(file.name.split('.').pop().toLowerCase()||'jpg');
+  const named=new File([blob],file.name.replace(/\.[^.]+$/,'')+'.'+ext,{type:resized?'image/jpeg':file.type});
+  const url=await _uploadToStorage(named,folder);
+  return{url,w,h,resized};
+}
+
 // Check video native resolution; returns {w,h} or null if undetectable
 function getVideoResolution(file){
   return new Promise(resolve=>{
@@ -1756,11 +1798,13 @@ async function handleFormImgUpload(ev){
   const files=Array.from(ev.target.files||[]);ev.target.value='';
   for(const file of files){
     const id=++formImgSeq;
-    const {dataUrl,resized,w,h}=await resizeImageToMax(file,1920,1080);
-    const sizeLabel=resized?`已压缩至 ${w}×${h}`:`${w}×${h}`;
-    formImages.push({id,name:file.name,size:sizeLabel,dataUrl});
-    logAction('upload',`上传图片「${file.name}」${resized?'（已自动压缩）':''}`);
-    renderFormImgGrid();
+    try{
+      const{url,resized,w,h}=await _uploadImageToStorage(file,'proj-imgs',1920,1080);
+      const sizeLabel=resized?`已压缩至 ${w}×${h}`:`${w}×${h}`;
+      formImages.push({id,name:file.name,size:sizeLabel,dataUrl:url});
+      logAction('upload',`上传图片「${file.name}」${resized?'（已自动压缩）':''}`);
+      renderFormImgGrid();
+    }catch(e){showToast('图片上传失败：'+e.message,'error');}
   }
 }
 function renderFormImgGrid(){
@@ -1793,9 +1837,11 @@ async function handleFormMatUpload(ev){
         continue;
       }
     }
-    const reader=new FileReader();
-    reader.onload=e=>{formMaterials.push({id,name:file.name,ext,size:fmtSize(file.size),dataUrl:e.target.result});logAction('upload',`上传资料「${file.name}」`);renderFormMatList();};
-    reader.readAsDataURL(file);
+    try{
+      const dataUrl=await _uploadToStorage(file,'proj-mats');
+      formMaterials.push({id,name:file.name,ext,size:fmtSize(file.size),dataUrl});
+      logAction('upload',`上传资料「${file.name}」`);renderFormMatList();
+    }catch(e){showToast('资料上传失败：'+e.message,'error');}
   }
 }
 function renderFormMatList(){
@@ -1961,10 +2007,12 @@ async function handleFacImgUpload(ev){
   const files=Array.from(ev.target.files||[]);ev.target.value='';
   for(const file of files){
     const id=++facImgSeq;
-    const {dataUrl,resized,w,h}=await resizeImageToMax(file,1920,1080);
-    const sizeLabel=resized?`已压缩至 ${w}×${h}`:`${w}×${h}`;
-    facImages.push({id,name:file.name,size:sizeLabel,dataUrl});
-    renderFacImgGrid();
+    try{
+      const{url,resized,w,h}=await _uploadImageToStorage(file,'fac-imgs',1920,1080);
+      const sizeLabel=resized?`已压缩至 ${w}×${h}`:`${w}×${h}`;
+      facImages.push({id,name:file.name,size:sizeLabel,dataUrl:url});
+      renderFacImgGrid();
+    }catch(e){showToast('图片上传失败：'+e.message,'error');}
   }
 }
 function renderFacImgGrid(){
@@ -1988,9 +2036,11 @@ async function handleFacMatUpload(ev){
       const res=await getVideoResolution(file);
       if(res&&(res.w>1280||res.h>720)){showToast(`「${file.name}」分辨率超过720P，请先压缩`,'error');continue;}
     }
-    const reader=new FileReader();
-    reader.onload=e=>{facMaterials.push({id,name:file.name,ext,size:fmtSize(file.size),dataUrl:e.target.result});renderFacMatList();};
-    reader.readAsDataURL(file);
+    try{
+      const dataUrl=await _uploadToStorage(file,'fac-mats');
+      facMaterials.push({id,name:file.name,ext,size:fmtSize(file.size),dataUrl});
+      renderFacMatList();
+    }catch(e){showToast('资料上传失败：'+e.message,'error');}
   }
 }
 function renderFacMatList(){
@@ -2117,7 +2167,7 @@ let _compImgDragId=null;
 async function handleCompImgUpload(ev){
   const files=Array.from(ev.target.files||[]);ev.target.value='';
   for(const file of files){
-    try{const r=await resizeImageToMax(file,1600,1600);const id=++compImgSeq;compImages.push({id,name:file.name,size:fmtSize(file.size),dataUrl:r.dataUrl});}catch(e){}
+    try{const{url}=await _uploadImageToStorage(file,'comp-imgs',1600,1600);const id=++compImgSeq;compImages.push({id,name:file.name,size:fmtSize(file.size),dataUrl:url});}catch(e){showToast('图片上传失败：'+e.message,'error');}
   }renderCompImgGrid();
 }
 function renderCompImgGrid(){
@@ -2130,7 +2180,7 @@ async function handleCompMatUpload(ev){
   const files=Array.from(ev.target.files||[]);ev.target.value='';
   for(const file of files){
     const parts=file.name.split('.');const ext=parts.length>1?parts[parts.length-1].toLowerCase():'';
-    let dataUrl='';if(file.size<50*1024*1024){try{dataUrl=await new Promise(res=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=()=>res('');r.readAsDataURL(file);});}catch(e){}}
+    let dataUrl='';if(file.size<50*1024*1024){try{dataUrl=await _uploadToStorage(file,'comp-mats');}catch(e){showToast('资料上传失败：'+e.message,'error');}}
     compMaterials.push({id:++compMatSeq,name:file.name,ext,size:fmtSize(file.size),dataUrl});
   }renderCompMatList();
 }
@@ -2362,7 +2412,8 @@ function _renderPreview(f){
   const inner=document.createElement('div');inner.className='preview-inner';
   inner.style.cssText='width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:auto;';
   const imgExts=['png','jpg','jpeg','gif','webp','svg','bmp'];
-  if(f.dataUrl&&f.dataUrl.startsWith('data:image')){
+  const isStorageUrl=f.dataUrl&&f.dataUrl.startsWith('https://');
+  if(f.dataUrl&&(f.dataUrl.startsWith('data:image')||(isStorageUrl&&imgExts.includes(ext)))){
     if(searchWrap)searchWrap.style.display='none';
     inner.innerHTML=`<img src="${f.dataUrl}" style="max-width:calc(100% - 100px);max-height:calc(88vh - 140px);display:block;object-fit:contain;padding:16px;" alt="${escHtml(f.name)}">`;
   }else if(imgExts.includes(ext)&&f.dataUrl){
@@ -2371,9 +2422,13 @@ function _renderPreview(f){
   }else if(ext==='pdf'&&f.dataUrl){
     if(searchWrap)searchWrap.style.display='none';
     inner.style.cssText='width:100%;height:100%;overflow:hidden;';
-    const blobUrl=_dataUrlToBlobUrl(f.dataUrl,'application/pdf');
-    inner.innerHTML=`<iframe src="${blobUrl}" style="width:100%;height:100%;border:none;" title="${escHtml(f.name)}"></iframe>`;
-    setTimeout(()=>URL.revokeObjectURL(blobUrl),120000);
+    if(isStorageUrl){
+      inner.innerHTML=`<iframe src="${f.dataUrl}" style="width:100%;height:100%;border:none;" title="${escHtml(f.name)}"></iframe>`;
+    }else{
+      const blobUrl=_dataUrlToBlobUrl(f.dataUrl,'application/pdf');
+      inner.innerHTML=`<iframe src="${blobUrl}" style="width:100%;height:100%;border:none;" title="${escHtml(f.name)}"></iframe>`;
+      setTimeout(()=>URL.revokeObjectURL(blobUrl),120000);
+    }
   }else if((ext==='docx'||ext==='doc')&&f.dataUrl){
     if(searchWrap)searchWrap.style.display='flex';
     inner.style.cssText='width:100%;height:100%;overflow:auto;';
@@ -2397,8 +2452,17 @@ function _dataUrlToBlobUrl(dataUrl,mimeType){
     return URL.createObjectURL(new Blob([ab],{type:mime}));
   }catch(e){return '';}
 }
-function _previewDownload(){
+async function _previewDownload(){
   const f=_previewCurrentFile;if(!f||!f.dataUrl)return;
+  if(f.dataUrl.startsWith('https://')){
+    try{
+      const resp=await fetch(f.dataUrl);const blob=await resp.blob();
+      const burl=URL.createObjectURL(blob);
+      const a=document.createElement('a');a.href=burl;a.download=f.name||'file';document.body.appendChild(a);a.click();document.body.removeChild(a);
+      setTimeout(()=>URL.revokeObjectURL(burl),15000);
+    }catch(e){window.open(f.dataUrl,'_blank');}
+    return;
+  }
   const a=document.createElement('a');a.href=f.dataUrl;a.download=f.name||'file';document.body.appendChild(a);a.click();document.body.removeChild(a);
 }
 async function _renderDocx(f,container){
@@ -2411,9 +2475,14 @@ async function _renderDocx(f,container){
         document.head.appendChild(s);
       });
     }
-    const b64=f.dataUrl.split(',')[1];const bin=atob(b64);
-    const ab=new ArrayBuffer(bin.length);const ia=new Uint8Array(ab);
-    for(let i=0;i<bin.length;i++)ia[i]=bin.charCodeAt(i);
+    let ab;
+    if(f.dataUrl.startsWith('https://')){
+      const resp=await fetch(f.dataUrl);ab=await resp.arrayBuffer();
+    }else{
+      const b64=f.dataUrl.split(',')[1];const bin=atob(b64);
+      ab=new ArrayBuffer(bin.length);const ia=new Uint8Array(ab);
+      for(let i=0;i<bin.length;i++)ia[i]=bin.charCodeAt(i);
+    }
     const result=await mammoth.convertToHtml({arrayBuffer:ab});
     const docEl=document.createElement('div');
     docEl.className='preview-doc-content';
