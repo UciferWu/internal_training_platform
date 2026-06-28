@@ -21,6 +21,24 @@
 html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;font-size:14px;color:var(--text);background:var(--bg);}
 .app{display:flex;flex-direction:column;height:100vh;}
 /* ── Loading Overlay ── */
+/* ── Login Page ── */
+#login-page{position:fixed;inset:0;z-index:10001;background:linear-gradient(135deg,#1a1f2e 0%,#0f1318 100%);display:none;align-items:center;justify-content:center;flex-direction:column;}
+.login-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:20px;padding:40px 48px;text-align:center;width:380px;box-shadow:0 20px 60px rgba(0,0,0,.4);}
+.login-brand{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:20px;}
+.login-brand-icon{width:44px;height:44px;background:var(--primary);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;}
+.login-brand-name{font-size:16px;font-weight:700;color:#fff;text-align:left;line-height:1.3;}
+.login-brand-sub{font-size:11px;color:rgba(255,255,255,.5);font-weight:400;}
+.login-divider{border:none;border-top:1px solid rgba(255,255,255,.1);margin:0 0 20px;}
+.login-heading{font-size:15px;color:rgba(255,255,255,.7);margin-bottom:20px;}
+.login-qr-wrap{width:260px;height:260px;margin:0 auto;border-radius:12px;overflow:hidden;background:#fff;position:relative;}
+.login-qr-wrap iframe{width:100%;height:100%;border:none;display:block;}
+.login-qr-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#fff;font-size:13px;color:#666;}
+.login-status{margin-top:16px;font-size:13px;color:rgba(255,255,255,.5);min-height:20px;}
+.login-status.err{color:#ff6b6b;}
+.login-status.ok{color:#51cf66;}
+.login-refresh-btn{margin-top:10px;padding:6px 18px;font-size:13px;border:1px solid rgba(255,255,255,.2);border-radius:99px;background:transparent;color:rgba(255,255,255,.7);cursor:pointer;transition:all .2s;}
+.login-refresh-btn:hover{background:rgba(255,255,255,.1);color:#fff;}
+.login-footer{margin-top:30px;font-size:12px;color:rgba(255,255,255,.25);}
 #loading-overlay{position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;transition:opacity .3s;}
 #loading-overlay.hidden{opacity:0;pointer-events:none;}
 .loading-spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:ld-spin .7s linear infinite;}
@@ -476,6 +494,27 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
 </style>
 </head>
 <body>
+<!-- ── Login Page ── -->
+<div id="login-page">
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="login-brand-icon">⛏️</div>
+      <div>
+        <div class="login-brand-name">几内亚铁矿项目管理系统</div>
+        <div class="login-brand-sub">Guinea Iron Ore Project Management</div>
+      </div>
+    </div>
+    <hr class="login-divider">
+    <div class="login-heading">请使用企业微信扫码登录</div>
+    <div class="login-qr-wrap" id="login-qr-wrap">
+      <div class="login-qr-loading">二维码加载中…</div>
+    </div>
+    <div class="login-status" id="login-status"></div>
+    <button class="login-refresh-btn" onclick="_refreshQRCode()">🔄 刷新二维码</button>
+    <div class="login-footer">© 2026 项目管理系统 · 仅限内部员工使用</div>
+  </div>
+</div>
+
 <div id="loading-overlay">
   <div class="loading-spinner"></div>
   <div style="font-size:13px;color:var(--text-secondary)">正在加载数据…</div>
@@ -497,10 +536,11 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
     <a href="#" id="nav-settings" onclick="switchView('settings');return false">⚙️ 设置</a>
   </nav>
   <div class="topbar-right">
-    <div class="user-chip">
-      <div class="user-avatar">ZL</div>
-      <span>张磊 · 项目管理员</span>
+    <div class="user-chip" id="topbar-user-chip">
+      <div class="user-avatar" id="topbar-user-av">--</div>
+      <span id="topbar-user-label">加载中…</span>
     </div>
+    <button class="btn btn-sm" id="topbar-logout-btn" onclick="wecomLogout()" style="display:none;margin-left:6px;background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.2)" title="退出登录">⬡ 退出</button>
   </div>
 </header>
 
@@ -2505,9 +2545,14 @@ const PERM_RULES={
 function can(action){return(PERM_RULES[action]||[]).includes(currentUser.role);}
 
 function applyPermissionsToUI(){
-  // Topbar chip
-  const chip=document.querySelector('.user-chip span');
-  if(chip)chip.textContent=`${currentUser.name} · ${ROLE_LABEL[currentUser.role]||''}`;
+  // Topbar user chip
+  const avEl=document.getElementById('topbar-user-av');
+  const labelEl=document.getElementById('topbar-user-label');
+  if(avEl)avEl.textContent=currentUser.initials||currentUser.name.slice(0,2);
+  if(labelEl)labelEl.textContent=`${currentUser.name} · ${ROLE_LABEL[currentUser.role]||''}`;
+  // 只在 SSO 启用时显示退出按钮
+  const logoutBtn=document.getElementById('topbar-logout-btn');
+  if(logoutBtn)logoutBtn.style.display=WECOM_SSO.enabled?'':'none';
   // Edit mode — force off if no permission
   const tog=document.getElementById('edit-toggle');
   if(tog&&tog.checked&&!can('editProject')){tog.checked=false;if(editMode){editMode=false;document.getElementById('add-btn').style.display='none';document.getElementById('edit-banner').classList.remove('visible');document.body.style.cursor='';}}
@@ -2939,43 +2984,82 @@ async function initDB(){
 // ── 配置项 ──
 // enabled: false = 演示模式（保持原来的用户切换条）
 //          true  = 开启企业微信 SSO（需配合后端 API）
+// ══════════════════════════════════════════════════════
+//  企业微信扫码登录配置
+//  ① 将 enabled 改为 true 后即启用扫码登录
+//  ② 填写 corpId / agentId / redirectUri
+//  ③ 在 Supabase 部署 wecom-auth Edge Function 并填写 authEdgeFunction
+// ══════════════════════════════════════════════════════
 const WECOM_SSO = {
-  enabled:     false,
-  corpId:      'ww填你的CorpID',
-  agentId:     '填你的AgentID',
-  redirectUri: location.origin + location.pathname, // 回调地址，需在企微后台配置可信域名
-  authApi:     '/api/auth/wecom',  // 后端：POST {code} → {token, user}
-  meApi:       '/api/me',          // 后端：GET (Authorization: Bearer <token>) → user
+  enabled:          false,                   // ← 改为 true 启用
+  corpId:           'ww97dd064c24554b5f',    // 企业微信 CorpID
+  agentId:          '1000051',              // 自建应用 AgentID
+  redirectUri:      location.origin + location.pathname, // 需与企微后台"可信域名/回调域名"一致
+  authEdgeFunction: 'https://ropewyrekctxoxchcuzv.supabase.co/functions/v1/wecom-auth',
 };
 
-function _authShowLoading(msg){
-  let el=document.getElementById('auth-loading');
-  if(!el){el=document.createElement('div');el.id='auth-loading';document.body.appendChild(el);}
-  el.innerHTML=`<div class="auth-spinner"></div><span class="auth-msg">${msg}</span>`;
-}
-function _authShowError(msg){
-  let el=document.getElementById('auth-loading');
-  if(!el){el=document.createElement('div');el.id='auth-loading';document.body.appendChild(el);}
-  el.innerHTML=`<span class="auth-err">⚠️ ${msg}</span><button class="auth-retry" onclick="location.href=location.pathname">重新登录</button>`;
-}
-function _authHide(){
-  const el=document.getElementById('auth-loading');if(el)el.remove();
+// ── JWT 解析（客户端仅读 payload，安全性由服务端签名保证） ──
+function _jwtDecode(token){
+  try{
+    const part=token.split('.')[1];
+    const b64=part.replace(/-/g,'+').replace(/_/g,'/');
+    return JSON.parse(atob(b64+'=='.slice((b64.length+3)%4)));
+  }catch{throw new Error('无效的登录凭证');}
 }
 
-async function _loadUserFromToken(token){
-  const res=await fetch(WECOM_SSO.meApi,{headers:{'Authorization':'Bearer '+token}});
-  if(!res.ok) throw new Error('token 已失效');
-  const u=await res.json();
-  // 后端返回的字段: {id, name, initials, email, role, status}
+function _loadUserFromJWT(token){
+  const p=_jwtDecode(token);
+  if(p.exp&&Date.now()/1000>p.exp) throw new Error('登录已过期，请重新扫码');
+  const u={id:parseInt(p.sub)||p.sub,name:p.name,role:p.role,
+            initials:p.initials||(p.name?p.name.slice(0,2):'??'),
+            email:p.email||'',status:'active'};
   if(!USERS.find(x=>x.id===u.id)) USERS.push(u);
-  currentUser=USERS.find(x=>x.id===u.id);
+  currentUser=USERS.find(x=>x.id===u.id)||u;
 }
 
+async function _wecomExchangeCode(code){
+  const res=await fetch(WECOM_SSO.authEdgeFunction,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({code})
+  });
+  const data=await res.json();
+  if(!res.ok||data.error) throw new Error(data.error||'登录失败');
+  return data.token;
+}
+
+// ── 登录页 UI 控制 ──
+function _showLoginPage(){
+  document.getElementById('loading-overlay').classList.add('hidden');
+  const lp=document.getElementById('login-page');
+  lp.style.display='flex';
+  _refreshQRCode();
+}
+function _hideLoginPage(){
+  document.getElementById('login-page').style.display='none';
+}
+function _setLoginStatus(msg,type=''){
+  const el=document.getElementById('login-status');
+  if(el){el.textContent=msg;el.className='login-status'+(type?' '+type:'');}
+}
+function _refreshQRCode(){
+  const st=Math.random().toString(36).slice(2);
+  sessionStorage.setItem('wx_sso_state',st);
+  const redirectUri=encodeURIComponent(WECOM_SSO.redirectUri);
+  const qrUrl=`https://open.work.weixin.qq.com/wwopen/sso/qrConnect?appid=${WECOM_SSO.corpId}&agentid=${WECOM_SSO.agentId}&redirect_uri=${redirectUri}&state=${st}&lang=zh`;
+  const wrap=document.getElementById('login-qr-wrap');
+  if(wrap) wrap.innerHTML=`<iframe src="${qrUrl}" frameborder="0" scrolling="no" style="width:100%;height:100%;border:none"></iframe>`;
+  _setLoginStatus('打开企业微信 → 扫一扫');
+}
+
+// ── 主认证流程 ──
 async function initWeComSSO(){
   if(!WECOM_SSO.enabled){
-    logAction('login',`用户「${currentUser.name}」登录系统`);
-    try{ await initDB(); }catch(e){ console.warn('DB加载失败:',e.message);
-      const ov=document.getElementById('loading-overlay');if(ov)ov.classList.add('hidden');
+    // 开发模式：直接使用默认用户，跳过认证
+    logAction('login',`用户「${currentUser.name}」登录系统（开发模式）`);
+    try{ await initDB(); }catch(e){
+      console.warn('DB加载失败:',e.message);
+      document.getElementById('loading-overlay').classList.add('hidden');
       switchView(currentView);
     }
     applyPermissionsToUI();
@@ -2986,64 +3070,51 @@ async function initWeComSSO(){
   const code=params.get('code');
   const state=params.get('state');
 
-  // ── 情况1：WeCom 回调带了 code ──
+  // ── 情况1：企业微信扫码回调（URL 含 ?code=） ──
   if(code){
     const saved=sessionStorage.getItem('wx_sso_state');
-    if(state&&saved&&state!==saved){_authShowError('登录校验失败，请重试');return;}
+    if(state&&saved&&state!==saved){
+      _showLoginPage();_setLoginStatus('安全校验失败，请重新扫码','err');return;
+    }
     sessionStorage.removeItem('wx_sso_state');
-    history.replaceState({},'',location.pathname); // 清除 URL 中的 code/state
-    _authShowLoading('正在登录，请稍候...');
+    history.replaceState({},'',location.pathname); // 清除 URL 参数
+    _setLoginStatus('正在验证身份…');
     try{
-      const res=await fetch(WECOM_SSO.authApi,{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({code})
-      });
-      const data=await res.json();
-      if(!res.ok||data.error) throw new Error(data.error||'登录失败');
-      localStorage.setItem('wecom_token',data.token);
-      await _loadUserFromToken(data.token);
+      const token=await _wecomExchangeCode(code);
+      localStorage.setItem('wecom_token',token);
+      _loadUserFromJWT(token);
       await initDB();
-      _authHide();
-      logAction('login',`用户「${currentUser.name}」通过企业微信登录`);
+      _hideLoginPage();
+      logAction('login',`用户「${currentUser.name}」通过企业微信扫码登录`);
       applyPermissionsToUI();
-    }catch(e){_authShowError('登录失败：'+e.message);}
+    }catch(e){
+      _showLoginPage();_setLoginStatus('❌ '+e.message,'err');
+    }
     return;
   }
 
-  // ── 情况2：本地已有 token ──
+  // ── 情况2：本地已有 JWT ──
   const token=localStorage.getItem('wecom_token');
   if(token){
-    _authShowLoading('验证登录状态...');
     try{
-      await _loadUserFromToken(token);
+      _loadUserFromJWT(token); // 验证过期
       await initDB();
-      _authHide();
+      document.getElementById('loading-overlay').classList.add('hidden');
       logAction('login',`用户「${currentUser.name}」登录系统`);
       applyPermissionsToUI();
       return;
     }catch(e){
-      localStorage.removeItem('wecom_token'); // token 失效，继续走授权流程
+      localStorage.removeItem('wecom_token'); // token 过期，清除
     }
   }
 
-  // ── 情况3：无 token 无 code → 跳企业微信授权 ──
-  const st=Math.random().toString(36).slice(2);
-  sessionStorage.setItem('wx_sso_state',st);
-  _authShowLoading('正在跳转企业微信授权...');
-  const redirectUri=encodeURIComponent(WECOM_SSO.redirectUri);
-  location.href='https://open.weixin.qq.com/connect/oauth2/authorize'
-    +'?appid='+WECOM_SSO.corpId
-    +'&redirect_uri='+redirectUri
-    +'&response_type=code'
-    +'&scope=snsapi_base'
-    +'&agentid='+WECOM_SSO.agentId
-    +'&state='+st
-    +'#wechat_redirect';
+  // ── 情况3：无凭证 → 显示扫码登录页 ──
+  _showLoginPage();
 }
 
-// 退出登录（SSO 模式调用）
+// ── 退出登录 ──
 function wecomLogout(){
+  if(!confirm(`确认退出登录？`)) return;
   logAction('logout',`用户「${currentUser.name}」退出系统`);
   localStorage.removeItem('wecom_token');
   location.href=location.pathname;
