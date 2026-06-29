@@ -1290,7 +1290,7 @@ const CAT_COLORS=['#0A5382','#1D9E75','#BA7517','#A32D2D','#7B5EA7','#2196A8','#
 let CATEGORIES=[];
 let FILES=[];
 let selectedCatId=null,archSearchQ='',archEditingCatId=null,archFileIdSeq=100,archCatIdSeq=10;
-let archEditingFileId=null,_archFileDragId=null;
+let archEditingFileId=null,archMovingFileId=null,_archFileDragId=null;
 
 function getVisibleFiles(){
   let f=selectedCatId===null?FILES:FILES.filter(x=>x.catId===selectedCatId);
@@ -1344,7 +1344,10 @@ function renderFileGrid(){
   window._archCtx=files.map(f=>({name:f.name,ext:f.ext,size:f.size,date:f.date,dataUrl:f.dataUrl||''}));
   h+=`<div class="arch-file-grid">${files.map((f,fi)=>{
     const isEditing=archEditingFileId===f.id;
-    return `<div class="arch-file-card" draggable="true"
+    const isMoving=archMovingFileId===f.id;
+    const curCat=CATEGORIES.find(c=>c.id===f.catId);
+    const catOpts=CATEGORIES.map(c=>`<option value="${c.id}"${c.id===f.catId?' selected':''}>${escHtml(c.name)}</option>`).join('');
+    return `<div class="arch-file-card" draggable="${isMoving?'false':'true'}"
       ondragstart="archFileDragStart(event,${f.id})" ondragend="archFileDragEnd(event)"
       ondragover="archFileDragOver(event,${f.id})" ondragleave="this.classList.remove('dg-over')"
       ondrop="archFileDrop(event,${f.id})">
@@ -1355,12 +1358,19 @@ function renderFileGrid(){
               onkeydown="if(event.key==='Enter')finishRenameFile(${f.id});if(event.key==='Escape')cancelRenameFile()"
               onblur="finishRenameFile(${f.id})">`
           : `<div class="arch-file-name">${escHtml(f.name)}</div>`}
-        <div class="arch-file-meta">${escHtml(f.ext.toUpperCase())} · ${escHtml(f.size)} · ${escHtml(f.date)}</div>
+        ${isMoving
+          ? `<div style="display:flex;gap:6px;align-items:center;margin:4px 0">
+               <select id="arch-move-select-${f.id}" class="form-select" style="flex:1;font-size:12px;padding:3px 6px;height:28px"
+                 onchange="finishMoveFile(${f.id})">${catOpts}</select>
+               <button class="arch-file-act" onclick="archMovingFileId=null;renderFileGrid()">取消</button>
+             </div>`
+          : `<div class="arch-file-meta">${escHtml(f.ext.toUpperCase())} · ${escHtml(f.size)} · ${escHtml(f.date)}${curCat?` · 📁 ${escHtml(curCat.name)}`:''}</div>`}
         <div class="arch-file-actions">
           <button class="arch-file-act" onclick="openPreviewInCtx('arch',${fi})">查看</button>
           ${isEditing
             ? `<button class="arch-file-act" onclick="cancelRenameFile()">取消</button>`
             : `<button class="arch-file-act" onclick="startRenameFile(${f.id})">重命名</button>`}
+          ${!isMoving?`<button class="arch-file-act" onclick="startMoveFile(${f.id})">移动到</button>`:''}
           <button class="arch-file-act del" onclick="confirmDelFile(${f.id})">删除</button>
         </div>
       </div>
@@ -1369,8 +1379,22 @@ function renderFileGrid(){
   content.innerHTML=h;
   if(archEditingFileId!==null){const inp=document.getElementById('arch-rename-input-'+archEditingFileId);if(inp){inp.focus();inp.select();}}
 }
-function startRenameFile(id){archEditingFileId=id;renderFileGrid();}
+function startRenameFile(id){archEditingFileId=id;archMovingFileId=null;renderFileGrid();}
 function cancelRenameFile(){archEditingFileId=null;renderFileGrid();}
+function startMoveFile(id){archMovingFileId=id;archEditingFileId=null;renderFileGrid();setTimeout(()=>{const s=document.getElementById('arch-move-select-'+id);if(s)s.focus();},0);}
+function finishMoveFile(id){
+  const sel=document.getElementById('arch-move-select-'+id);
+  if(!sel)return;
+  const newCatId=parseInt(sel.value);
+  const f=FILES.find(x=>x.id===id);
+  if(f&&newCatId&&newCatId!==f.catId){
+    f.catId=newCatId;
+    dbSave(db.saveArchFile(f));
+    logAction('edit',`资料「${f.name}」移动至「${(CATEGORIES.find(c=>c.id===newCatId)||{name:'?'}).name}」`);
+    showToast('资料类别已更新','success');
+  }
+  archMovingFileId=null;renderFileGrid();
+}
 function finishRenameFile(id){
   if(archEditingFileId!==id)return;
   const inp=document.getElementById('arch-rename-input-'+id);
@@ -1813,6 +1837,23 @@ function _genStoragePath(folder,filename){
   const uid=Date.now().toString(36)+Math.random().toString(36).slice(2,6);
   return `${folder}/${uid}.${ext}`;
 }
+// 从完整 Supabase URL 或裸路径中提取存储路径
+function _storagePath(urlOrPath){
+  if(!urlOrPath||urlOrPath.startsWith('data:'))return null;
+  if(urlOrPath.startsWith('https://')){
+    const m=urlOrPath.match(/\/object\/(?:public|authenticated|sign)\/[^/]+\/(.+?)(?:\?|$)/);
+    return m?decodeURIComponent(m[1]):null;
+  }
+  return urlOrPath;
+}
+// 生成有时效的签名 URL（默认 2 小时）
+async function _getSignedUrl(urlOrPath,expiresIn=7200){
+  const path=_storagePath(urlOrPath);
+  if(!path)return urlOrPath; // data: URL 直接返回
+  const{data,error}=await _sb.storage.from(_STORAGE_BUCKET).createSignedUrl(path,expiresIn);
+  if(error)throw error;
+  return data.signedUrl;
+}
 
 // ── 上传进度条 ──
 let _upwTimer=null;
@@ -1840,7 +1881,7 @@ async function _uploadToStorage(file,folder,onProgress){
     onUploadProgress:onProgress?(e)=>onProgress(e.loaded,e.total):undefined
   });
   if(error)throw error;
-  return _sb.storage.from(_STORAGE_BUCKET).getPublicUrl(path).data.publicUrl;
+  return path; // 返回存储路径，不暴露公开 URL
 }
 // Resize image to blob (JPEG), then upload to Storage; returns {url,w,h,resized}
 async function _uploadImageToStorage(file,folder,maxW=1920,maxH=1080,onProgress){
@@ -2520,9 +2561,10 @@ function openPreview(f){
   document.getElementById('preview-modal').classList.add('open');
 }
 
-let _previewDocEl=null,_previewDocOrigHTML='',_previewCurrentFile=null,_previewSearchMatches=[];
-function _renderPreview(f){
+let _previewDocEl=null,_previewDocOrigHTML='',_previewCurrentFile=null,_previewAccessUrl=null,_previewSearchMatches=[];
+async function _renderPreview(f){
   _previewCurrentFile=f;
+  _previewAccessUrl=null;
   const ext=(f.ext||'').toLowerCase();
   document.getElementById('preview-icon').style.background=fileBg(ext);
   document.getElementById('preview-icon').textContent=fileIcon(ext);
@@ -2547,37 +2589,60 @@ function _renderPreview(f){
   const old=body.querySelector('.preview-inner');if(old)old.remove();
   const inner=document.createElement('div');inner.className='preview-inner';
   inner.style.cssText='width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:auto;';
+  body.appendChild(inner);
+  // 先占位，避免白屏
+  if(f.dataUrl&&!f.dataUrl.startsWith('data:')){
+    inner.innerHTML=`<div style="color:var(--text-tertiary);font-size:13px">正在获取文件…</div>`;
+  }
+  // 生成签名 URL（私有 bucket 必须）
+  let accessUrl=f.dataUrl||'';
+  if(accessUrl&&!accessUrl.startsWith('data:')){
+    try{ accessUrl=await _getSignedUrl(accessUrl,7200); }
+    catch(e){ inner.innerHTML=`<div class="preview-placeholder"><div class="big-icon">🔒</div><p>无法获取文件访问权限</p><p style="font-size:12px;color:var(--text-tertiary)">${escHtml(e.message)}</p></div>`;return; }
+  }
+  _previewAccessUrl=accessUrl;
   const imgExts=['png','jpg','jpeg','gif','webp','svg','bmp'];
-  const isStorageUrl=f.dataUrl&&f.dataUrl.startsWith('https://');
-  if(f.dataUrl&&(f.dataUrl.startsWith('data:image')||(isStorageUrl&&imgExts.includes(ext)))){
+  const isHttp=accessUrl.startsWith('https://');
+  if(accessUrl&&(accessUrl.startsWith('data:image')||(isHttp&&imgExts.includes(ext)))){
     if(searchWrap)searchWrap.style.display='none';
-    inner.innerHTML=`<img src="${f.dataUrl}" style="max-width:calc(100% - 100px);max-height:calc(88vh - 140px);display:block;object-fit:contain;padding:16px;" alt="${escHtml(f.name)}">`;
-  }else if(imgExts.includes(ext)&&f.dataUrl){
+    inner.style.cssText='width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:auto;';
+    inner.innerHTML=`<img src="${accessUrl}" style="max-width:calc(100% - 100px);max-height:calc(88vh - 140px);display:block;object-fit:contain;padding:16px;" alt="${escHtml(f.name)}">`;
+  }else if(imgExts.includes(ext)&&accessUrl){
     if(searchWrap)searchWrap.style.display='none';
-    inner.innerHTML=`<img src="${f.dataUrl}" style="max-width:calc(100% - 100px);display:block;object-fit:contain;padding:16px;">`;
-  }else if(ext==='pdf'&&f.dataUrl){
+    inner.innerHTML=`<img src="${accessUrl}" style="max-width:calc(100% - 100px);display:block;object-fit:contain;padding:16px;">`;
+  }else if(ext==='pdf'&&accessUrl){
     if(searchWrap)searchWrap.style.display='none';
     inner.style.cssText='width:100%;height:100%;overflow:hidden;';
-    if(isStorageUrl){
-      inner.innerHTML=`<iframe src="${f.dataUrl}" style="width:100%;height:100%;border:none;" title="${escHtml(f.name)}"></iframe>`;
+    if(isHttp){
+      inner.innerHTML=`<iframe src="${accessUrl}" style="width:100%;height:100%;border:none;" title="${escHtml(f.name)}"></iframe>`;
     }else{
-      const blobUrl=_dataUrlToBlobUrl(f.dataUrl,'application/pdf');
+      const blobUrl=_dataUrlToBlobUrl(accessUrl,'application/pdf');
       inner.innerHTML=`<iframe src="${blobUrl}" style="width:100%;height:100%;border:none;" title="${escHtml(f.name)}"></iframe>`;
       setTimeout(()=>URL.revokeObjectURL(blobUrl),120000);
     }
-  }else if((ext==='docx'||ext==='doc')&&f.dataUrl){
+  }else if((ext==='docx'||ext==='doc')&&accessUrl){
     if(searchWrap)searchWrap.style.display='flex';
     inner.style.cssText='width:100%;height:100%;overflow:auto;';
     inner.innerHTML=`<div style="padding:40px;text-align:center;color:var(--text-tertiary)">正在解析文档…</div>`;
-    _renderDocx(f,inner);
-  }else if((ext==='pptx'||ext==='ppt')&&f.dataUrl){
+    _renderDocx(accessUrl,inner);
+  }else if((ext==='pptx'||ext==='ppt')&&accessUrl){
     if(searchWrap)searchWrap.style.display='none';
-    inner.innerHTML=`<div class="preview-placeholder"><div class="big-icon">${fileIcon(ext)}</div><p style="color:var(--text-secondary);font-weight:500">${escHtml(f.name)}</p><p>PPT 格式暂不支持在线预览</p><button class="btn btn-primary" style="margin-top:12px" onclick="_previewDownload()">⬇ 下载查看</button></div>`;
+    if(isHttp){
+      inner.style.cssText='width:100%;height:100%;overflow:hidden;position:relative;';
+      inner.innerHTML=`
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:0;color:var(--text-tertiary);font-size:13px;">正在加载预览…</div>
+        <iframe src="https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(accessUrl)}"
+          style="width:100%;height:100%;border:none;position:relative;z-index:1;"
+          title="${escHtml(f.name)}"
+          onload="this.previousElementSibling.style.display='none'">
+        </iframe>`;
+    }else{
+      inner.innerHTML=`<div class="preview-placeholder"><div class="big-icon">${fileIcon(ext)}</div><p style="color:var(--text-secondary);font-weight:500">${escHtml(f.name)}</p><p>PPT 格式暂不支持在线预览</p><button class="btn btn-primary" style="margin-top:12px" onclick="_previewDownload()">⬇ 下载查看</button></div>`;
+    }
   }else{
     if(searchWrap)searchWrap.style.display='none';
-    inner.innerHTML=`<div class="preview-placeholder"><div class="big-icon">${fileIcon(ext)}</div><p style="color:var(--text-secondary);font-weight:500">${escHtml(f.name)}</p><p>该格式暂不支持在线预览</p>${f.dataUrl?`<button class="btn btn-primary" style="margin-top:12px" onclick="_previewDownload()">⬇ 下载查看</button>`:''}</div>`;
+    inner.innerHTML=`<div class="preview-placeholder"><div class="big-icon">${fileIcon(ext)}</div><p style="color:var(--text-secondary);font-weight:500">${escHtml(f.name)}</p><p>该格式暂不支持在线预览</p>${accessUrl?`<button class="btn btn-primary" style="margin-top:12px" onclick="_previewDownload()">⬇ 下载查看</button>`:''}</div>`;
   }
-  body.appendChild(inner);
 }
 function _dataUrlToBlobUrl(dataUrl,mimeType){
   try{
@@ -2589,19 +2654,25 @@ function _dataUrlToBlobUrl(dataUrl,mimeType){
   }catch(e){return '';}
 }
 async function _previewDownload(){
-  const f=_previewCurrentFile;if(!f||!f.dataUrl)return;
-  if(f.dataUrl.startsWith('https://')){
+  const f=_previewCurrentFile;if(!f)return;
+  // 优先用已生成的签名 URL，如不可用则重新生成
+  let url=_previewAccessUrl;
+  if(!url&&f.dataUrl){
+    try{ url=await _getSignedUrl(f.dataUrl,3600); }catch(e){ showToast('下载失败：'+e.message,'error');return; }
+  }
+  if(!url)return;
+  if(url.startsWith('https://')){
     try{
-      const resp=await fetch(f.dataUrl);const blob=await resp.blob();
+      const resp=await fetch(url);const blob=await resp.blob();
       const burl=URL.createObjectURL(blob);
       const a=document.createElement('a');a.href=burl;a.download=f.name||'file';document.body.appendChild(a);a.click();document.body.removeChild(a);
       setTimeout(()=>URL.revokeObjectURL(burl),15000);
-    }catch(e){window.open(f.dataUrl,'_blank');}
+    }catch(e){window.open(url,'_blank');}
     return;
   }
-  const a=document.createElement('a');a.href=f.dataUrl;a.download=f.name||'file';document.body.appendChild(a);a.click();document.body.removeChild(a);
+  const a=document.createElement('a');a.href=url;a.download=f.name||'file';document.body.appendChild(a);a.click();document.body.removeChild(a);
 }
-async function _renderDocx(f,container){
+async function _renderDocx(url,container){
   try{
     if(!window.mammoth){
       await new Promise((resolve,reject)=>{
@@ -2612,10 +2683,10 @@ async function _renderDocx(f,container){
       });
     }
     let ab;
-    if(f.dataUrl.startsWith('https://')){
-      const resp=await fetch(f.dataUrl);ab=await resp.arrayBuffer();
+    if(url.startsWith('https://')){
+      const resp=await fetch(url);ab=await resp.arrayBuffer();
     }else{
-      const b64=f.dataUrl.split(',')[1];const bin=atob(b64);
+      const b64=url.split(',')[1];const bin=atob(b64);
       ab=new ArrayBuffer(bin.length);const ia=new Uint8Array(ab);
       for(let i=0;i<bin.length;i++)ia[i]=bin.charCodeAt(i);
     }
@@ -2837,48 +2908,33 @@ function renderSettings(){
 
 function renderUsersTab(){
   const body=document.getElementById('settings-body');if(!body)return;
-  const rows=USERS.map((u,i)=>{
-    const isSelf=u.id===currentUser.id;
-    const avCol=AV_COLORS[i%AV_COLORS.length];
-    return `<tr>
-      <td><div class="user-cell">
-        <div class="user-av" style="background:${avCol};width:34px;height:34px;font-size:11px">${escHtml(u.initials)}</div>
-        <div>
-          <div class="user-cell-name">${escHtml(u.name)}${isSelf?'<span style="font-size:10px;color:var(--text-tertiary);margin-left:4px">(当前用户)</span>':''}</div>
-          <div class="user-cell-email">${escHtml(u.email)}</div>
-        </div>
-      </div></td>
-      <td>
-        <select class="u-role-select" onchange="changeUserRole(${u.id},this.value)"${isSelf?' disabled':''}>
-          ${['admin','trainer','senior','junior'].map(r=>`<option value="${r}"${u.role===r?' selected':''}>${ROLE_LABEL[r]}</option>`).join('')}
-        </select>
-      </td>
-      <td><div class="status-dot-wrap"><div class="s-dot ${u.status}"></div>${u.status==='active'?'正常':'停用'}</div></td>
-      <td style="font-size:11px;color:var(--text-secondary);white-space:nowrap">${escHtml(u.lastLogin)}</td>
-      <td><div class="u-actions">
-        ${u.status==='active'
-          ?`<button class="btn btn-sm" onclick="toggleUserStatus(${u.id})"${isSelf?' disabled':''}>停用</button>`
-          :`<button class="btn btn-sm btn-primary" onclick="toggleUserStatus(${u.id})">启用</button>`}
-        <button class="btn btn-sm" onclick="openUserModal(${u.id})">编辑</button>
-        <button class="btn btn-sm btn-danger" onclick="confirmDeleteUser(${u.id})"${isSelf?' disabled':''}>删除</button>
-      </div></td>
-    </tr>`;
-  }).join('');
+  const u=currentUser||{};
+  const avCol=AV_COLORS[0];
+  const adminRow=`<tr>
+    <td><div class="user-cell">
+      <div class="user-av" style="background:${avCol};width:34px;height:34px;font-size:11px">${escHtml(u.initials||'管')}</div>
+      <div>
+        <div class="user-cell-name">${escHtml(u.name||'系统管理员')}<span style="font-size:10px;color:var(--text-tertiary);margin-left:4px">(当前用户)</span></div>
+        <div class="user-cell-email">${escHtml(u.email||'—')}</div>
+      </div>
+    </div></td>
+    <td><span class="role-badge role-admin">管理员</span></td>
+    <td><div class="status-dot-wrap"><div class="s-dot active"></div>正常</div></td>
+    <td style="font-size:11px;color:var(--text-secondary);white-space:nowrap">—</td>
+    <td><span style="font-size:11px;color:var(--text-tertiary)">—</span></td>
+  </tr>`;
   body.innerHTML=`
   <div class="settings-section">
     <div class="settings-section-header">
       <div>
         <div class="settings-section-title">用户管理</div>
-        <div class="settings-section-meta">共 ${USERS.length} 名用户，${USERS.filter(u=>u.status==='active').length} 名正常</div>
+        <div class="settings-section-meta">当前为密码登录模式，启用企业微信 SSO 后将支持多用户管理</div>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="openUserModal()">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>新建用户
-      </button>
     </div>
     <div style="overflow-x:auto">
       <table class="u-table">
         <thead><tr><th>用户</th><th>角色</th><th>状态</th><th>最后登录</th><th>操作</th></tr></thead>
-        <tbody>${rows}</tbody>
+        <tbody>${adminRow}</tbody>
       </table>
     </div>
   </div>
@@ -3256,7 +3312,7 @@ function _refreshQRCode(){
 async function initWeComSSO(){
   if(!WECOM_SSO.enabled){
     // 开发模式：若无已登录用户，使用临时管理员账号
-    if(!currentUser) currentUser={id:1,name:'开发管理员',role:'admin',initials:'管理',email:'dev@local',status:'active'};
+    if(!currentUser) currentUser={id:1,name:'系统管理员',role:'admin',initials:'管理',email:'admin@local',status:'active'};
     try{ await initDB(); }catch(e){
       console.warn('DB加载失败:',e.message);
       document.getElementById('loading-overlay').classList.add('hidden');
@@ -3940,17 +3996,37 @@ function frSaveWord(){
   const zhApprox=(document.getElementById('frw-approx').value||'').trim();
   const example=(document.getElementById('frw-example').value||'').trim();
   if(frEditingWordId){
+    // 编辑模式：跳过唯一性校验（允许编辑同一单词）
     const w=FR_WORDS.find(x=>x.id===frEditingWordId);
     if(w){Object.assign(w,{fr,zh,catId,phonetic,zhApprox,example});logAction('edit',`编辑词汇「${fr}」`);dbSave(db.saveFrWord(w));}
+    frCloseWordForm();renderFrVocab();frRenderCats();
+    showToast('词汇已更新','success');
   }else{
-    const newW={id:++FR_WORD_SEQ,catId,fr,zh,phonetic,zhApprox,example};
-    FR_WORDS.push(newW);
-    logAction('upload',`添加词汇「${fr}」`);
-    dbSave(db.saveFrWord(newW));
-    frVocabPage=Infinity; // 新词添加到末尾，跳到最后一页
+    // 新增模式：唯一性校验
+    const frLower=fr.toLowerCase();
+    const exactDup=FR_WORDS.find(x=>x.fr.toLowerCase()===frLower&&x.catId===catId);
+    if(exactDup){
+      showToast('该类别下已存在此单词，无法重复添加','error');return;
+    }
+    const otherCatDup=FR_WORDS.find(x=>x.fr.toLowerCase()===frLower&&x.catId!==catId);
+    const doAdd=()=>{
+      const newW={id:++FR_WORD_SEQ,catId,fr,zh,phonetic,zhApprox,example};
+      FR_WORDS.push(newW);
+      logAction('upload',`添加词汇「${fr}」`);
+      dbSave(db.saveFrWord(newW));
+      frVocabPage=Infinity;
+      frCloseWordForm();renderFrVocab();frRenderCats();
+      showToast('词汇已添加','success');
+    };
+    if(otherCatDup){
+      const otherCat=FR_CATEGORIES.find(c=>c.id===otherCatDup.catId);
+      showConfirm('单词已存在于其他类别',
+        `「${fr}」已在「${otherCat?otherCat.name:'其他类别'}」中存在。是否仍要添加到当前类别？`,
+        doAdd);
+    }else{
+      doAdd();
+    }
   }
-  frCloseWordForm();renderFrVocab();frRenderCats();
-  showToast(frEditingWordId?'词汇已更新':'词汇已添加','success');
 }
 
 function frDeleteWord(id){
