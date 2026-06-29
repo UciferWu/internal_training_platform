@@ -539,11 +539,6 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
     <a href="#" id="nav-settings" onclick="switchView('settings');return false" data-i18n="nav_settings">⚙️ 设置</a>
   </nav>
   <div class="topbar-right">
-    <!-- 语言切换 -->
-    <div id="lang-switcher" style="display:flex;gap:2px;margin-right:8px;">
-      <button class="lang-btn active" id="lang-zh" onclick="setAppLang('zh')" title="中文">中</button>
-      <button class="lang-btn"        id="lang-en" onclick="setAppLang('en')" title="English">EN</button>
-    </div>
     <div class="user-chip" id="topbar-user-chip">
       <div class="user-avatar" id="topbar-user-av">--</div>
       <span id="topbar-user-label" data-i18n="loading">加载中…</span>
@@ -572,9 +567,9 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
   </div>
   <div class="toolbar-right">
     <div class="map-layer-ctrl">
-      <button class="layer-btn active" data-layer="street"    onclick="setMapLayer('street')"    id="lb-street"    data-i18n="layer_street">🗺 街道图</button>
-      <button class="layer-btn"        data-layer="satellite" onclick="setMapLayer('satellite')" id="lb-satellite" data-i18n="layer_satellite">🛰 卫星图</button>
-      <button class="layer-btn"        data-layer="hybrid"    onclick="setMapLayer('hybrid')"    id="lb-hybrid"    data-i18n="layer_hybrid">🌍 混合图</button>
+      <button class="layer-btn"        data-layer="street"    onclick="setMapLayer('street')"    id="lb-street">🗺 街道图</button>
+      <button class="layer-btn"        data-layer="satellite" onclick="setMapLayer('satellite')" id="lb-satellite">🛰 卫星图</button>
+      <button class="layer-btn active" data-layer="hybrid"    onclick="setMapLayer('hybrid')"    id="lb-hybrid">🌍 混合图</button>
     </div>
     <div class="toggle-group">
       <label class="toggle">
@@ -1480,7 +1475,7 @@ async function handleUpload(ev){
 //  Map
 // ══════════════════════════════════════════════════════
 let map,streetLayer,satelliteLayer,hybridLabelLayer;
-let currentLayer='street',markerLayer={},facilityMarkerLayer={};
+let currentLayer='hybrid',markerLayer={},facilityMarkerLayer={};
 let editMode=false,activeProjectId=null,activeFacilityId=null,editingId=null,editingFacilityId=null,pendingDeleteId=null;
 let FACILITIES=[],facilityIdSeq=2000;
 let COMPETITORS=[],competitorIdSeq=3000;
@@ -1525,10 +1520,10 @@ function removeFacilityMarker(id){if(facilityMarkerLayer[id]){map.removeLayer(fa
 function refreshFacilityMarker(f){removeFacilityMarker(f.id);addFacilityMarker(f);}
 function initMap(){
   map=L.map('map',{zoomControl:true}).setView([10,15],3);
-  streetLayer=_makeStreetLayer(appLang);
+  streetLayer=_makeStreetLayer();
   satelliteLayer=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{attribution:'© Esri',maxZoom:19});
   hybridLabelLayer=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Reference_Overlay/MapServer/tile/{z}/{y}/{x}',{attribution:'© Esri',maxZoom:19,pane:'overlayPane'});
-  streetLayer.addTo(map);
+  setMapLayer('hybrid');
   PROJECTS.forEach(p=>addMarker(p));
   _fitMapToMarkers();
   map.on('click',e=>{if(editMode)openAddModal(e.latlng.lat,e.latlng.lng);});
@@ -1750,39 +1745,38 @@ function resizeImageToMax(file, maxW, maxH){
 
 // ── Supabase Storage 上传工具 ──
 // ══════════════════════════════════════════════════════
-//  i18n — 三语切换
+//  地图底图：IP 自动检测（中国大陆→高德，其他→OSM）
 // ══════════════════════════════════════════════════════
-let appLang=localStorage.getItem('appLang')||'zh';
+let _tileProvider='amap'; // 默认高德；IP 检测后可能切换为 osm
 
-const I18N={
-  zh:{
-    title:'人力内部培训平台',
-    nav_map:'🗺 项目地图', nav_archive:'📚 几内亚培训资料',
-    nav_french:'🇫🇷 法语培训', nav_settings:'⚙️ 设置',
-    loading:'加载中…', logout:'⬡ 退出',
-    search_proj:'搜索项目名称…',
-    status_all:'全部状态', status_research:'研究中', status_construction:'建设中',
-    status_operation:'运营中', status_expansion:'扩建中',
-    status_done:'完成结束', status_cancelled:'取消',
-    pin_count_pre:'共 ', pin_count_post:' 个业务项目',
-    layer_street:'🗺 街道图', layer_satellite:'🛰 卫星图', layer_hybrid:'🌍 混合图',
-    edit_mode:'编辑模式', new_pin:'新建坐标',
-  },
-  en:{
-    title:'HR Training Platform',
-    nav_map:'🗺 Project Map', nav_archive:'📚 Guinea Training',
-    nav_french:'🇫🇷 French Training', nav_settings:'⚙️ Settings',
-    loading:'Loading…', logout:'⬡ Logout',
-    search_proj:'Search projects…',
-    status_all:'All Status', status_research:'Research', status_construction:'Construction',
-    status_operation:'Operation', status_expansion:'Expansion',
-    status_done:'Completed', status_cancelled:'Cancelled',
-    pin_count_pre:'', pin_count_post:' projects',
-    layer_street:'🗺 Street', layer_satellite:'🛰 Satellite', layer_hybrid:'🌍 Hybrid',
-    edit_mode:'Edit Mode', new_pin:'New Pin',
-  },
-};
-function t(key){return(I18N[appLang]||I18N.zh)[key]||(I18N.zh[key]||key);}
+function _makeStreetLayer(){
+  if(_tileProvider==='osm'){
+    return L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      {attribution:'© OpenStreetMap contributors',maxZoom:19});
+  }
+  return L.tileLayer(
+    'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
+    {attribution:'© 高德地图',subdomains:['1','2','3','4'],maxZoom:19});
+}
+
+function _applyStreetLayer(){
+  if(!map||!streetLayer)return;
+  const wasStreet=map.hasLayer(streetLayer);
+  map.removeLayer(streetLayer);
+  streetLayer=_makeStreetLayer();
+  if(wasStreet)streetLayer.addTo(map);
+}
+
+async function _autoDetectTiles(){
+  try{
+    const r=await fetch('https://ipapi.co/json/');
+    const d=await r.json();
+    _tileProvider=(d.country_code==='CN')?'amap':'osm';
+  }catch(e){
+    _tileProvider='amap'; // 检测失败默认高德
+  }
+  _applyStreetLayer();
+}
 
 // ── 临时访问密码 ──
 const _PW_KEY='app_authed';
@@ -1812,47 +1806,6 @@ function _pwCheck(){
   return false;
 }
 
-function applyLanguage(){
-  // 更新所有 data-i18n 文本
-  document.querySelectorAll('[data-i18n]').forEach(el=>{
-    const k=el.getAttribute('data-i18n');const v=t(k);if(v)el.textContent=v;
-  });
-  // 更新 placeholder
-  document.querySelectorAll('[data-i18n-placeholder]').forEach(el=>{
-    const k=el.getAttribute('data-i18n-placeholder');el.placeholder=t(k)||el.placeholder;
-  });
-  // 更新 pin count 前后缀（保留数字不变）
-  const pc=document.querySelector('.pin-count');
-  if(pc){const n=document.getElementById('pin-count');const num=n?n.textContent:'0';pc.innerHTML=t('pin_count_pre')+'<strong id="pin-count">'+num+'</strong>'+t('pin_count_post');}
-  // 更新语言按钮高亮
-  ['zh','en','fr'].forEach(l=>{const b=document.getElementById('lang-'+l);if(b)b.classList.toggle('active',l===appLang);});
-  // 更新地图底图（如果地图已初始化）
-  _applyStreetLayer();
-  // 保存偏好
-  localStorage.setItem('appLang',appLang);
-}
-
-// ── 地图底图 helpers ──
-// 街道图：高德地图（中国可访问），按语言切换中/英文标注
-function _makeStreetLayer(lang){
-  const amapLang=lang==='zh'?'zh_cn':'en';
-  return L.tileLayer(
-    `https://webrd0{s}.is.autonavi.com/appmaptile?lang=${amapLang}&size=1&scale=1&style=8&x={x}&y={y}&z={z}`,
-    {attribution:'© 高德地图',subdomains:['1','2','3','4'],maxZoom:19});
-}
-function _applyStreetLayer(){
-  if(!map||!streetLayer)return;
-  const wasVisible=map.hasLayer(streetLayer);
-  if(wasVisible)map.removeLayer(streetLayer);
-  streetLayer=_makeStreetLayer(appLang);
-  if(wasVisible||currentLayer==='street')streetLayer.addTo(map);
-}
-
-function setAppLang(lang){
-  if(lang===appLang)return;
-  appLang=lang;
-  applyLanguage();
-}
 
 const _STORAGE_BUCKET='app-files';
 function _genStoragePath(folder,filename){
@@ -3372,13 +3325,12 @@ function wecomLogout(){
 //  Init
 // ══════════════════════════════════════════════════════
 async function _appStart(){
-  applyLanguage();     // 应用保存的语言偏好（在 initMap 之前，地图还未建，_applyStreetLayer 会空跑）
   initMap();           // 先建地图（空的），DB 加载后 _rebuildMarkers 会加标记
   initQuillEditors();
   renderFormImgGrid();
   renderFormMatList();
   await initWeComSSO(); // 里面会加载 DB 数据，结束后调 applyPermissionsToUI
-  applyLanguage();     // 地图建完后再调一次，让 _applyStreetLayer 能正确切换底图
+  _autoDetectTiles();  // 根据 IP 自动选择地图底图（异步，不阻塞启动）
 }
 
 // 页面启动：先验证密码
