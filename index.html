@@ -1600,7 +1600,7 @@ function openDetail(id){
   const descHtml=pLoc(p)?`<div class="desc-html">${pLoc(p)}</div>`:'<span style="font-size:12px;color:var(--text-tertiary)">—</span>';
   const allMats=[...(p.contents||[]),...(p.materials||[])];
   window._detailImgCtx=(p.images||[]).map(img=>({name:img.name,ext:'jpg',size:img.size,date:'',dataUrl:img.dataUrl||''}));
-  const imgSection=(p.images&&p.images.length)?`<div class="section"><div class="section-title">项目图片 (${p.images.length})</div><div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:4px">${p.images.map((img,ii)=>`<div style="width:70px;height:70px;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--border);cursor:pointer;flex-shrink:0" onclick="openPreviewInCtx('detailImg',${ii})"><img src="${img.dataUrl||''}" style="width:100%;height:100%;object-fit:cover;display:block"></div>`).join('')}</div></div>`:'';
+  const imgSection=(p.images&&p.images.length)?`<div class="section"><div class="section-title">项目图片 (${p.images.length})</div><div id="detail-img-grid-proj" style="display:flex;flex-wrap:wrap;gap:6px;padding-top:4px">${p.images.map((img,ii)=>`<div style="width:70px;height:70px;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--border);cursor:pointer;flex-shrink:0;background:var(--border)" onclick="openPreviewInCtx('detailImg',${ii})"><img src="" data-storage="1" data-path="${escHtml(img.dataUrl||'')}" style="width:100%;height:100%;object-fit:cover;display:block"></div>`).join('')}</div></div>`:'';
   const editBtns=(editMode&&can('editProject'))?`<div class="detail-actions"><button class="btn btn-sm" onclick="openEditModal(${p.id})"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>编辑</button><button class="btn btn-sm btn-danger" onclick="confirmDelete(${p.id})"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>删除</button></div>`:'';
   dc.innerHTML=`
   <div class="detail-header">
@@ -1633,6 +1633,7 @@ function openDetail(id){
     facSection.innerHTML=`<div class="section-title">项目设施 (${projFacs.length})</div><div class="content-list">${facHtml}</div>`;
     dc.appendChild(facSection);
   }
+  _lazyLoadThumbSigned(dc);
   Object.values(markerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='.5';});
   Object.values(facilityMarkerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='.5';});
   if(markerLayer[id]){markerLayer[id].getElement().style.opacity='1';map.panTo([p.lat,p.lng],{animate:true,duration:.4});}
@@ -1855,6 +1856,18 @@ async function _getSignedUrl(urlOrPath,expiresIn=7200){
   return data.signedUrl;
 }
 
+// 为未设 thumbUrl 的图片（DB 加载的旧数据）异步生成签名 URL 并填充 src
+function _lazyLoadThumbSigned(container){
+  const imgs=container.querySelectorAll('img[data-storage="1"]');
+  imgs.forEach(async(el)=>{
+    const path=el.getAttribute('data-path');if(!path)return;
+    try{
+      const url=await _getSignedUrl(path,3600);
+      el.src=url;el.removeAttribute('data-storage');
+    }catch(e){el.style.background='var(--border)';}
+  });
+}
+
 // ── 上传进度条 ──
 let _upwTimer=null;
 function _showUploadProgress(label,sub,pct){
@@ -1908,8 +1921,9 @@ async function _uploadImageToStorage(file,folder,maxW=1920,maxH=1080,onProgress)
   });
   const ext=resized?'jpg':(file.name.split('.').pop().toLowerCase()||'jpg');
   const named=new File([blob],file.name.replace(/\.[^.]+$/,'')+'.'+ext,{type:resized?'image/jpeg':file.type});
+  const thumbUrl=URL.createObjectURL(blob); // 本地缩略图 URL，仅当前会话有效
   const url=await _uploadToStorage(named,folder,onProgress);
-  return{url,w,h,resized};
+  return{url,w,h,resized,thumbUrl};
 }
 
 // Check video native resolution; returns {w,h} or null if undetectable
@@ -1936,11 +1950,11 @@ async function handleFormImgUpload(ev){
     const file=files[i];const id=++formImgSeq;
     _showUploadProgress(file.name,total>1?`图片 ${i+1} / ${total}`:'正在压缩并上传…',0);
     try{
-      const{url,resized,w,h}=await _uploadImageToStorage(file,'proj-imgs',1920,1080,(loaded,ttl)=>{
+      const{url,resized,w,h,thumbUrl}=await _uploadImageToStorage(file,'proj-imgs',1920,1080,(loaded,ttl)=>{
         _showUploadProgress(file.name,total>1?`图片 ${i+1} / ${total}`:'',ttl?loaded/ttl*100:50);
       });
       const sizeLabel=resized?`已压缩至 ${w}×${h}`:`${w}×${h}`;
-      formImages.push({id,name:file.name,size:sizeLabel,dataUrl:url});
+      formImages.push({id,name:file.name,size:sizeLabel,dataUrl:url,thumbUrl});
       logAction('upload',`上传图片「${file.name}」${resized?'（已自动压缩）':''}`);
       renderFormImgGrid();
     }catch(e){showToast('图片上传失败：'+e.message,'error');}
@@ -1954,9 +1968,12 @@ function renderFormImgGrid(){
   el.innerHTML=formImages.map((img,idx)=>`<div class="form-img-thumb" draggable="true"
     ondragstart="imgDragStart(event,${img.id})" ondragend="imgDragEnd(event)"
     ondragover="imgDragOver(event,${img.id})" ondragleave="this.classList.remove('dg-over')" ondrop="imgDrop(event,${img.id})">
-    <img src="${img.dataUrl}" title="${escHtml(img.name)}\n${escHtml(img.size)}" onclick="openPreviewInCtx('img',${idx})">
+    <img src="${img.thumbUrl||''}" data-storage="${img.thumbUrl?'':'1'}" data-path="${escHtml(img.dataUrl)}"
+      title="${escHtml(img.name)}\n${escHtml(img.size)}" onclick="openPreviewInCtx('img',${idx})"
+      style="${img.thumbUrl?'':'background:var(--border);'}">
     <div class="form-img-overlay"><button class="form-img-act" onclick="removeFormImg(${img.id})">×</button></div>
   </div>`).join('');
+  _lazyLoadThumbSigned(el);
 }
 function removeFormImg(id){formImages=formImages.filter(x=>x.id!==id);renderFormImgGrid();}
 
@@ -2155,11 +2172,11 @@ async function handleFacImgUpload(ev){
     const file=files[i];const id=++facImgSeq;
     _showUploadProgress(file.name,total>1?`图片 ${i+1} / ${total}`:'正在压缩并上传…',0);
     try{
-      const{url,resized,w,h}=await _uploadImageToStorage(file,'fac-imgs',1920,1080,(loaded,ttl)=>{
+      const{url,resized,w,h,thumbUrl}=await _uploadImageToStorage(file,'fac-imgs',1920,1080,(loaded,ttl)=>{
         _showUploadProgress(file.name,total>1?`图片 ${i+1} / ${total}`:'',ttl?loaded/ttl*100:50);
       });
       const sizeLabel=resized?`已压缩至 ${w}×${h}`:`${w}×${h}`;
-      facImages.push({id,name:file.name,size:sizeLabel,dataUrl:url});
+      facImages.push({id,name:file.name,size:sizeLabel,dataUrl:url,thumbUrl});
       renderFacImgGrid();
     }catch(e){showToast('图片上传失败：'+e.message,'error');}
   }
@@ -2170,9 +2187,12 @@ function renderFacImgGrid(){
   if(!facImages.length){el.innerHTML='<span class="form-empty-hint">暂无图片</span>';return;}
   window._facImgCtxTemp=facImages.map(img=>({name:img.name,ext:'jpg',size:img.size,date:'',dataUrl:img.dataUrl}));
   el.innerHTML=facImages.map((img,idx)=>`<div class="form-img-thumb">
-    <img src="${img.dataUrl}" title="${escHtml(img.name)}" onclick="openPreview({name:'${escHtml(img.name)}',ext:'jpg',size:'${escHtml(img.size)}',date:'',dataUrl:'${img.dataUrl}'})">
+    <img src="${img.thumbUrl||''}" data-storage="${img.thumbUrl?'':'1'}" data-path="${escHtml(img.dataUrl)}"
+      title="${escHtml(img.name)}" onclick="openPreviewInCtx('facForm',${idx})"
+      style="${img.thumbUrl?'':'background:var(--border);'}">
     <div class="form-img-overlay"><button class="form-img-act" onclick="removeFacImg(${img.id})">×</button></div>
   </div>`).join('');
+  _lazyLoadThumbSigned(el);
 }
 function removeFacImg(id){facImages=facImages.filter(x=>x.id!==id);renderFacImgGrid();}
 
@@ -2282,7 +2302,7 @@ function openFacilityDetail(id){
   window._detailCtx=(f.materials||[]).map(m=>({name:m.name,ext:m.ext,size:m.size,date:'',dataUrl:m.dataUrl||''}));
   window._detailImgCtx=(f.images||[]).map(img=>({name:img.name,ext:'jpg',size:img.size,date:'',dataUrl:img.dataUrl||''}));
   const matsHtml=(f.materials&&f.materials.length)?f.materials.map((m,mi)=>`<div class="content-item" onclick="openPreviewInCtx('detail',${mi})"><div class="content-icon icon-doc" style="background:${fileBg(m.ext)}">${fileIcon(m.ext)}</div><div style="min-width:0"><div class="content-item-title">${escHtml(m.name)}</div><div class="content-item-meta">${escHtml(m.ext.toUpperCase()+' · '+m.size)}</div></div></div>`).join(''):`<p style="font-size:13px;color:#B4B2A9;padding:4px 0">暂无资料</p>`;
-  const imgSection=(f.images&&f.images.length)?`<div class="section"><div class="section-title">设施图片 (${f.images.length})</div><div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:4px">${f.images.map((img,ii)=>`<div style="width:70px;height:70px;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--border);cursor:pointer;flex-shrink:0" onclick="openPreviewInCtx('detailImg',${ii})"><img src="${img.dataUrl||''}" style="width:100%;height:100%;object-fit:cover;display:block"></div>`).join('')}</div></div>`:'';
+  const imgSection=(f.images&&f.images.length)?`<div class="section"><div class="section-title">设施图片 (${f.images.length})</div><div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:4px">${f.images.map((img,ii)=>`<div style="width:70px;height:70px;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--border);cursor:pointer;flex-shrink:0;background:var(--border)" onclick="openPreviewInCtx('detailImg',${ii})"><img src="" data-storage="1" data-path="${escHtml(img.dataUrl||'')}" style="width:100%;height:100%;object-fit:cover;display:block"></div>`).join('')}</div></div>`:'';
   const editBtns=(editMode&&can('editProject'))?`<div class="detail-actions"><button class="btn btn-sm" onclick="openEditFacilityModal(${f.id})"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>编辑</button><button class="btn btn-sm btn-danger" onclick="confirmDeleteFacility(${f.id})"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>删除</button></div>`:'';
   dc.innerHTML=`
   <div class="detail-header">
@@ -2300,6 +2320,7 @@ function openFacilityDetail(id){
   </div>
   <div class="section" style="flex:1"><div class="section-title">设施资料 (${(f.materials||[]).length})</div><div class="content-list">${matsHtml}</div></div>
   ${imgSection}`;
+  _lazyLoadThumbSigned(dc);
   Object.values(markerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='.5';});
   Object.values(facilityMarkerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='.5';});
   if(facilityMarkerLayer[id]){facilityMarkerLayer[id].getElement().style.opacity='1';map.panTo([f.lat,f.lng],{animate:true,duration:.4});}
@@ -2326,10 +2347,10 @@ async function handleCompImgUpload(ev){
     const file=files[i];
     _showUploadProgress(file.name,total>1?`图片 ${i+1} / ${total}`:'正在压缩并上传…',0);
     try{
-      const{url}=await _uploadImageToStorage(file,'comp-imgs',1600,1600,(loaded,ttl)=>{
+      const{url,thumbUrl}=await _uploadImageToStorage(file,'comp-imgs',1600,1600,(loaded,ttl)=>{
         _showUploadProgress(file.name,total>1?`图片 ${i+1} / ${total}`:'',ttl?loaded/ttl*100:50);
       });
-      const id=++compImgSeq;compImages.push({id,name:file.name,size:fmtSize(file.size),dataUrl:url});
+      const id=++compImgSeq;compImages.push({id,name:file.name,size:fmtSize(file.size),dataUrl:url,thumbUrl});
     }catch(e){showToast('图片上传失败：'+e.message,'error');}
   }
   _showUploadProgress('上传完成','',100);_hideUploadProgress();
@@ -2338,7 +2359,13 @@ async function handleCompImgUpload(ev){
 function renderCompImgGrid(){
   const el=document.getElementById('comp-img-grid');if(!el)return;
   if(!compImages.length){el.innerHTML='<span class="form-empty-hint">暂无图片</span>';return;}
-  el.innerHTML=compImages.map((img,i)=>`<div class="form-img-item" draggable="true" ondragstart="_compImgDragId=${img.id};event.dataTransfer.effectAllowed='move'" ondragend="_compImgDragId=null" ondragover="event.preventDefault()" ondrop="compImgDrop(event,${img.id})"><img src="${img.dataUrl}" onclick="openPreview({name:img.name,ext:'jpg',size:img.size,date:'',dataUrl:img.dataUrl})"><button class="form-img-del" onclick="compImages=compImages.filter(x=>x.id!==${img.id});renderCompImgGrid()">×</button></div>`).join('');
+  el.innerHTML=compImages.map((img,i)=>`<div class="form-img-item" draggable="true" ondragstart="_compImgDragId=${img.id};event.dataTransfer.effectAllowed='move'" ondragend="_compImgDragId=null" ondragover="event.preventDefault()" ondrop="compImgDrop(event,${img.id})">
+    <img src="${img.thumbUrl||''}" data-storage="${img.thumbUrl?'':'1'}" data-path="${escHtml(img.dataUrl)}"
+      style="${img.thumbUrl?'':'background:var(--border);'}"
+      onclick="openPreviewInCtx('compForm',${i})">
+    <button class="form-img-del" onclick="compImages=compImages.filter(x=>x.id!==${img.id});renderCompImgGrid()">×</button>
+  </div>`).join('');
+  _lazyLoadThumbSigned(el);
 }
 function compImgDrop(ev,toId){ev.preventDefault();const fi=compImages.findIndex(x=>x.id===_compImgDragId),ti=compImages.findIndex(x=>x.id===toId);if(fi<0||ti<0)return;const[a]=compImages.splice(fi,1);compImages.splice(ti,0,a);renderCompImgGrid();}
 async function handleCompMatUpload(ev){
@@ -2424,7 +2451,7 @@ function openCompetitorDetail(id){
   window._detailCtx=(c.materials||[]).map(m=>({name:m.name,ext:m.ext,size:m.size,date:'',dataUrl:m.dataUrl||''}));
   window._detailImgCtx=(c.images||[]).map(img=>({name:img.name,ext:'jpg',size:img.size,date:'',dataUrl:img.dataUrl||''}));
   const matsHtml=(c.materials&&c.materials.length)?c.materials.map((m,mi)=>`<div class="content-item" onclick="openPreviewInCtx('detail',${mi})"><div class="content-icon icon-doc" style="background:${fileBg(m.ext)}">${fileIcon(m.ext)}</div><div style="min-width:0"><div class="content-item-title">${escHtml(m.name)}</div><div class="content-item-meta">${escHtml(m.ext.toUpperCase()+' · '+m.size)}</div></div></div>`).join(''):`<p style="font-size:13px;color:#B4B2A9;padding:4px 0">暂无资料</p>`;
-  const imgSection=(c.images&&c.images.length)?`<div class="section"><div class="section-title">设施图片 (${c.images.length})</div><div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:4px">${c.images.map((img,ii)=>`<div style="width:70px;height:70px;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--border);cursor:pointer;flex-shrink:0" onclick="openPreviewInCtx('detailImg',${ii})"><img src="${img.dataUrl||''}" style="width:100%;height:100%;object-fit:cover;display:block"></div>`).join('')}</div></div>`:'';
+  const imgSection=(c.images&&c.images.length)?`<div class="section"><div class="section-title">设施图片 (${c.images.length})</div><div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:4px">${c.images.map((img,ii)=>`<div style="width:70px;height:70px;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--border);cursor:pointer;flex-shrink:0;background:var(--border)" onclick="openPreviewInCtx('detailImg',${ii})"><img src="" data-storage="1" data-path="${escHtml(img.dataUrl||'')}" style="width:100%;height:100%;object-fit:cover;display:block"></div>`).join('')}</div></div>`:'';
   const editBtns=(editMode&&can('editProject'))?`<div class="detail-actions"><button class="btn btn-sm" onclick="openEditCompetitorModal(${c.id})"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>编辑</button><button class="btn btn-sm btn-danger" onclick="confirmDeleteCompetitor(${c.id})"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>删除</button></div>`:'';
   dc.innerHTML=`
   <div class="detail-header">
@@ -2442,6 +2469,7 @@ function openCompetitorDetail(id){
   </div>
   <div class="section" style="flex:1"><div class="section-title">资料 (${(c.materials||[]).length})</div><div class="content-list">${matsHtml}</div></div>
   ${imgSection}`;
+  _lazyLoadThumbSigned(dc);
   Object.values(markerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='.5';});
   Object.values(facilityMarkerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='.5';});
   Object.values(competitorMarkerLayer).forEach(m=>{const el=m.getElement();if(el)el.style.opacity='.5';});
