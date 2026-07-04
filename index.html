@@ -3636,22 +3636,17 @@ function _newsSettingsHtml(cfg){
     <div class="news-time-opts">${tOpts}</div>
   </div>
   <div class="news-settings-section">
-    <div class="news-settings-title">🚀 数据源部署说明</div>
-    <p style="font-size:13px;color:var(--text-secondary);line-height:1.6;margin-bottom:10px">本功能需要部署一个 Supabase Edge Function（<code style="background:var(--bg);padding:1px 4px;border-radius:3px">hr-news</code>），通过 Google News RSS 抓取公开信息源，<strong>无需额外 API Key</strong>。</p>
-    <ol style="font-size:12px;color:var(--text-secondary);line-height:2.1;padding-left:18px;margin-bottom:12px">
-      <li>在项目根目录创建 <code>supabase/functions/hr-news/index.ts</code></li>
-      <li>粘贴下方 Edge Function 代码</li>
-      <li>运行命令：<code style="background:var(--bg);padding:1px 6px;border-radius:3px;font-size:11px">supabase functions deploy hr-news --project-ref ropewyrekctxoxchcuzv</code></li>
-    </ol>
-    <button class="btn btn-sm" onclick="newsToggleCode(this)">📋 查看 Edge Function 代码</button>
-    <div id="news-fn-code-wrap" style="display:none;margin-top:12px">
-      <pre class="news-deploy-pre" id="news-fn-code-pre">${escHtml(_newsEdgeFnCode())}</pre>
-      <button class="btn btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('news-fn-code-pre').textContent).then(()=>showToast('代码已复制到剪贴板','success'))">📋 复制代码</button>
-    </div>
+    <div class="news-settings-title">ℹ️ 数据来源说明</div>
+    <p style="font-size:13px;color:var(--text-secondary);line-height:1.7;margin:0">
+      新闻数据来自 <strong>Google News RSS</strong> 公开信息源，无需任何后端部署或 API Key。系统通过公共 CORS 代理转发请求，直接在浏览器内完成搜索。
+      <br><br>
+      <strong>如果搜索返回空结果：</strong>当前网络环境可能限制了代理服务访问，请切换到可访问境外网络的环境后重试。
+      搜索以英文和法文查询为主，建议保持默认时间范围（30天）以获得最佳结果。
+    </p>
   </div>
   </div>`;
 }
-function _newsEdgeFnCode(){
+function _unused_newsEdgeFnCode(){
   return `import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 
 const cors = {
@@ -3737,12 +3732,47 @@ serve(async (req) => {
   }
 })`;
 }
-function newsToggleCode(btn){
-  const w=document.getElementById('news-fn-code-wrap');
-  if(!w)return;
-  const show=w.style.display==='none';
-  w.style.display=show?'block':'none';
-  btn.textContent=show?'▲ 收起代码':'📋 查看 Edge Function 代码';
+// (newsToggleCode removed — no longer needed)
+// CORS 代理列表（依次尝试）
+const _NEWS_PROXIES=[
+  url=>`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+  url=>`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+];
+async function _newsProxyFetch(targetUrl){
+  for(const mkProxy of _NEWS_PROXIES){
+    try{
+      const res=await fetch(mkProxy(targetUrl),{signal:AbortSignal.timeout(9000)});
+      if(!res.ok)continue;
+      const data=await res.json();
+      // allorigins returns {contents:...}, codetabs returns raw text
+      return typeof data==='string'?data:(data.contents||JSON.stringify(data));
+    }catch(e){continue;}
+  }
+  return null;
+}
+function _newsParseRSS(xml,category,meta){
+  const items=[];
+  if(!xml)return items;
+  const re=/<item>([\s\S]*?)<\/item>/g;
+  let m;
+  while((m=re.exec(xml))!==null){
+    const b=m[1];
+    const title=(b.match(/<title><!\[CDATA\[(.*?)\]\]>/)?.[1]||b.match(/<title>(.*?)<\/title>/)?.[1]||'').replace(/<[^>]+>/g,'').trim();
+    const link=(b.match(/<link>(.*?)<\/link>/)?.[1]||'').trim();
+    const pub=b.match(/<pubDate>(.*?)<\/pubDate>/)?.[1]||'';
+    const src=(b.match(/<source[^>]*>(.*?)<\/source>/)?.[1]||'').trim();
+    const desc=(b.match(/<description><!\[CDATA\[(.*?)\]\]>/)?.[1]||b.match(/<description>(.*?)<\/description>/)?.[1]||'').replace(/<[^>]+>/g,'').trim();
+    if(title&&link){items.push({title,url:link,source:src,date:pub?new Date(pub).toISOString().split('T')[0]:'',snippet:desc.slice(0,280),category,...meta});}
+    if(items.length>=8)break;
+  }
+  return items;
+}
+async function _newsFetchRSS(query,category,meta,targetArr){
+  try{
+    const rssUrl=`https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=fr&gl=FR&ceid=FR:fr`;
+    const xml=await _newsProxyFetch(rssUrl);
+    _newsParseRSS(xml,category,meta).forEach(i=>targetArr.push(i));
+  }catch(e){console.warn('RSS fetch:',query,e);}
 }
 async function fetchNews(){
   if(_newsLoading)return;
@@ -3751,24 +3781,27 @@ async function fetchNews(){
   _newsLoading=true;_newsError=null;_newsDeployError=false;
   renderNews();
   try{
-    const res=await fetch('https://ropewyrekctxoxchcuzv.supabase.co/functions/v1/hr-news',{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+SUPABASE_ANON},
-      body:JSON.stringify({countries:cfg.countries,companies:cfg.companies||[],timeRange:cfg.timeRange||30})
-    });
-    if(res.status===404||res.status===503||res.status===401){
-      _newsDeployError=true;_newsLoading=false;renderNews();return;
+    const tw=`when:${cfg.timeRange||30}d`;
+    const labor=[],mining=[],hr=[];
+    const tasks=[];
+    const cmap=Object.fromEntries(ECOWAS_COUNTRIES.map(c=>[c.code,c]));
+    for(const code of cfg.countries){
+      const c=cmap[code];if(!c)continue;
+      tasks.push(_newsFetchRSS(`"${c.fr}" "code du travail" OR "droit du travail" OR emploi ${tw}`,'labor',{country:code},labor));
+      tasks.push(_newsFetchRSS(`"${c.en}" "labor law" OR "employment law" OR "workers rights" ${tw}`,'labor',{country:code},labor));
+      tasks.push(_newsFetchRSS(`"${c.fr}" "code minier" OR mine OR infrastructure ${tw}`,'mining',{country:code},mining));
+      tasks.push(_newsFetchRSS(`"${c.en}" "mining law" OR "mineral regulation" OR "infrastructure law" ${tw}`,'mining',{country:code},mining));
     }
-    if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error||`HTTP ${res.status}`);}
-    const data=await res.json();
-    if(data.error)throw new Error(data.error);
-    _newsResults={labor:data.labor||[],mining:data.mining||[],hr:data.hr||[],fetchedAt:data.fetchedAt};
-    _newsError=null;_newsDeployError=false;
-  }catch(e){
-    if(e.message&&(e.message.includes('fetch')||e.message.includes('network')||e.message.toLowerCase().includes('failed'))){
-      _newsDeployError=true;
-    }else{_newsError=e.message;}
-  }
+    for(const company of(cfg.companies||[])){
+      tasks.push(_newsFetchRSS(`"${company}" grève OR strike OR syndicat OR accident OR licenciement ${tw}`,'hr',{company},hr));
+      tasks.push(_newsFetchRSS(`"${company}" directeur OR CEO OR recrutement OR workers OR employees ${tw}`,'hr',{company},hr));
+    }
+    await Promise.all(tasks);
+    const dedup=arr=>{const s=new Set();return arr.filter(i=>{if(s.has(i.url))return false;s.add(i.url);return true;});};
+    _newsResults={labor:dedup(labor).slice(0,40),mining:dedup(mining).slice(0,40),hr:dedup(hr).slice(0,40),fetchedAt:new Date().toISOString()};
+    _newsError=null;
+    if(!labor.length&&!mining.length&&!hr.length)_newsError='未获取到新闻，可能是网络限制导致代理访问失败，请稍后重试';
+  }catch(e){_newsError=e.message;}
   _newsLoading=false;renderNews();
 }
 function newsToggleCountry(code){
@@ -3812,23 +3845,14 @@ function newsDelCompany(idx){
 }
 function _newsDeployCard(){
   return `<div class="news-deploy-wrap">
-  <div style="font-size:48px;margin-bottom:16px">🚀</div>
-  <div style="font-size:16px;font-weight:600;margin-bottom:8px">需要部署后端搜索服务</div>
-  <p style="font-size:13px;color:var(--text-secondary);line-height:1.6;margin-bottom:16px">
-    本功能通过 <strong>Supabase Edge Function</strong> 从 Google News 等公开信息源实时抓取新闻。<br>
-    请按以下步骤完成部署，<strong>无需额外 API Key</strong>，部署一次即可永久使用。
+  <div style="font-size:48px;margin-bottom:16px">🌐</div>
+  <div style="font-size:16px;font-weight:600;margin-bottom:8px">代理服务访问受限</div>
+  <p style="font-size:13px;color:var(--text-secondary);line-height:1.65;margin-bottom:20px">
+    新闻搜索通过公共 CORS 代理访问 Google News，当前网络环境无法连接代理服务。<br><br>
+    <strong>建议：</strong>切换到可访问境外网络（科学上网）的环境后重试，或联系管理员配置专用代理。
   </p>
-  <div style="text-align:left;margin-bottom:16px">
-    <ol style="font-size:12px;color:var(--text-secondary);line-height:2.2;padding-left:18px">
-      <li>创建文件：<code style="background:var(--bg);padding:1px 5px;border-radius:3px">supabase/functions/hr-news/index.ts</code></li>
-      <li>前往 <strong>⚙ 设置</strong> Tab → 数据源部署说明 → 复制 Edge Function 代码</li>
-      <li>运行部署命令：<code style="background:var(--bg);padding:1px 5px;border-radius:3px;font-size:11px">supabase functions deploy hr-news --project-ref ropewyrekctxoxchcuzv</code></li>
-      <li>部署完成后，点击"搜索动态"即可使用</li>
-    </ol>
-  </div>
-  <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-    <button class="btn btn-primary" onclick="newsSetTab('settings')">前往查看部署说明</button>
-    <button class="btn" onclick="fetchNews()">重试</button>
+  <div style="display:flex;gap:8px;justify-content:center">
+    <button class="btn btn-primary" onclick="fetchNews()">🔄 重试</button>
   </div>
   </div>`;
 }
