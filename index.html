@@ -2,6 +2,9 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>韦立集团人力内部培训平台</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
@@ -518,6 +521,9 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
 .news-card-badge.gn{background:#E9F7EF;color:#1E8449;}
 .news-card-badge.ci{background:#FEF9E7;color:#7D6608;}
 .news-card-badge.other{background:var(--bg);color:var(--text-secondary);}
+.news-card-title-zh{font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:3px;line-height:1.45;cursor:pointer;}
+.news-card-title-zh:hover{color:var(--primary);text-decoration:underline;}
+.news-card-title-fr{font-size:12px;color:var(--text-secondary);font-style:italic;margin-bottom:5px;line-height:1.4;}
 .news-card-title{font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:5px;line-height:1.45;cursor:pointer;}
 .news-card-title:hover{color:var(--primary);text-decoration:underline;}
 .news-card-snippet{font-size:12px;color:var(--text-secondary);line-height:1.55;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
@@ -1155,7 +1161,7 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
 <div class="news-view" id="news-view">
   <div id="news-toolbar-wrap"></div>
   <div id="news-tab-bar-wrap"></div>
-  <div id="news-body"></div>
+  <div id="news-body" class="news-body"></div>
 </div>
 
 <!-- ── Confirm ── -->
@@ -3522,22 +3528,10 @@ function wecomLogout(){
 // ══════════════════════════════════════════════════════
 //  HR News
 // ══════════════════════════════════════════════════════
+// 新闻功能支持的国家（与 Edge Function SITES 列表对应）
 const ECOWAS_COUNTRIES=[
   {code:'GN',name:'几内亚',en:'Guinea',fr:'Guinée',flag:'🇬🇳'},
   {code:'CI',name:'科特迪瓦',en:"Côte d'Ivoire",fr:"Côte d'Ivoire",flag:'🇨🇮'},
-  {code:'SN',name:'塞内加尔',en:'Senegal',fr:'Sénégal',flag:'🇸🇳'},
-  {code:'ML',name:'马里',en:'Mali',fr:'Mali',flag:'🇲🇱'},
-  {code:'BF',name:'布基纳法索',en:'Burkina Faso',fr:'Burkina Faso',flag:'🇧🇫'},
-  {code:'NE',name:'尼日尔',en:'Niger',fr:'Niger',flag:'🇳🇪'},
-  {code:'GH',name:'加纳',en:'Ghana',fr:'Ghana',flag:'🇬🇭'},
-  {code:'NG',name:'尼日利亚',en:'Nigeria',fr:'Nigeria',flag:'🇳🇬'},
-  {code:'TG',name:'多哥',en:'Togo',fr:'Togo',flag:'🇹🇬'},
-  {code:'BJ',name:'贝宁',en:'Benin',fr:'Bénin',flag:'🇧🇯'},
-  {code:'LR',name:'利比里亚',en:'Liberia',fr:'Liberia',flag:'🇱🇷'},
-  {code:'SL',name:'塞拉利昂',en:'Sierra Leone',fr:'Sierra Leone',flag:'🇸🇱'},
-  {code:'GM',name:'冈比亚',en:'Gambia',fr:'Gambie',flag:'🇬🇲'},
-  {code:'GW',name:'几内亚比绍',en:'Guinea-Bissau',fr:'Guinée-Bissau',flag:'🇬🇼'},
-  {code:'CV',name:'佛得角',en:'Cape Verde',fr:'Cap-Vert',flag:'🇨🇻'},
 ];
 const _NEWS_DEFAULT_COMPANIES=['SMB','CBG','CBK','Rio Tinto','Anglo American','Winning International','中国铝业','CPDM'];
 let _newsTab='labor';
@@ -3601,6 +3595,8 @@ function renderNewsBody(cfg){
   const meta=_newsResults.fetchedAt?`<div style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px">共 ${items.length} 条 · 更新：${new Date(_newsResults.fetchedAt).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'})}</div>`:'';
   body.innerHTML=meta+items.map(item=>{
     const cn=item.country?countryOf(item.country):null;
+    const titleZh=item.titleZh||item.title;
+    const titleFr=item.titleFr&&item.titleFr!==titleZh?item.titleFr:'';
     return `<div class="news-card">
       <div class="news-card-top">
         <span class="news-card-source">${escHtml(item.source||'新闻')}</span>
@@ -3608,7 +3604,8 @@ function renderNewsBody(cfg){
         ${item.company?`<span class="news-card-badge other">🏢 ${escHtml(item.company)}</span>`:''}
         <span class="news-card-date">${item.date||''}</span>
       </div>
-      <div class="news-card-title" onclick="window.open(${JSON.stringify(item.url)},'_blank')">${escHtml(item.title)}</div>
+      <div class="news-card-title-zh" onclick="window.open(${JSON.stringify(item.url)},'_blank')">${escHtml(titleZh)}</div>
+      ${titleFr?`<div class="news-card-title-fr">${escHtml(titleFr)}</div>`:''}
       ${item.snippet?`<div class="news-card-snippet">${escHtml(item.snippet)}</div>`:''}
     </div>`;
   }).join('');
@@ -3781,27 +3778,31 @@ async function fetchNews(){
   _newsLoading=true;_newsError=null;_newsDeployError=false;
   renderNews();
   try{
-    const tw=`when:${cfg.timeRange||30}d`;
-    const labor=[],mining=[],hr=[];
-    const tasks=[];
-    const cmap=Object.fromEntries(ECOWAS_COUNTRIES.map(c=>[c.code,c]));
-    for(const code of cfg.countries){
-      const c=cmap[code];if(!c)continue;
-      tasks.push(_newsFetchRSS(`"${c.fr}" "code du travail" OR "droit du travail" OR emploi ${tw}`,'labor',{country:code},labor));
-      tasks.push(_newsFetchRSS(`"${c.en}" "labor law" OR "employment law" OR "workers rights" ${tw}`,'labor',{country:code},labor));
-      tasks.push(_newsFetchRSS(`"${c.fr}" "code minier" OR mine OR infrastructure ${tw}`,'mining',{country:code},mining));
-      tasks.push(_newsFetchRSS(`"${c.en}" "mining law" OR "mineral regulation" OR "infrastructure law" ${tw}`,'mining',{country:code},mining));
+    const resp=await fetch(`${SUPABASE_URL}/functions/v1/hr-news`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':`Bearer ${SUPABASE_ANON}`},
+      body:JSON.stringify({countries:cfg.countries,companies:cfg.companies||[],timeRange:cfg.timeRange||30}),
+    });
+    if(!resp.ok){
+      const txt=await resp.text().catch(()=>'');
+      if(resp.status===404||resp.status===503){_newsDeployError=true;throw new Error('Edge function not deployed');}
+      throw new Error(`请求失败 ${resp.status}: ${txt}`);
     }
-    for(const company of(cfg.companies||[])){
-      tasks.push(_newsFetchRSS(`"${company}" grève OR strike OR syndicat OR accident OR licenciement ${tw}`,'hr',{company},hr));
-      tasks.push(_newsFetchRSS(`"${company}" directeur OR CEO OR recrutement OR workers OR employees ${tw}`,'hr',{company},hr));
-    }
-    await Promise.all(tasks);
-    const dedup=arr=>{const s=new Set();return arr.filter(i=>{if(s.has(i.url))return false;s.add(i.url);return true;});};
-    _newsResults={labor:dedup(labor).slice(0,40),mining:dedup(mining).slice(0,40),hr:dedup(hr).slice(0,40),fetchedAt:new Date().toISOString()};
+    const data=await resp.json();
+    if(data.error)throw new Error(data.error);
+    _newsResults={
+      labor:(data.labor||[]).slice(0,40),
+      mining:(data.mining||[]).slice(0,40),
+      hr:(data.hr||[]).slice(0,40),
+      fetchedAt:data.fetchedAt||new Date().toISOString()
+    };
     _newsError=null;
-    if(!labor.length&&!mining.length&&!hr.length)_newsError='未获取到新闻，可能是网络限制导致代理访问失败，请稍后重试';
-  }catch(e){_newsError=e.message;}
+    if(!_newsResults.labor.length&&!_newsResults.mining.length&&!_newsResults.hr.length)
+      _newsError='未获取到新闻，请稍后重试';
+  }catch(e){
+    if(e.message==='Edge function not deployed'){_newsDeployError=true;}
+    else{_newsError=e.message;}
+  }
   _newsLoading=false;renderNews();
 }
 function newsToggleCountry(code){
