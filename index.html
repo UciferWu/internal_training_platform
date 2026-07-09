@@ -3540,6 +3540,7 @@ let _newsResults={labor:[],mining:[],hr:[],fetchedAt:null};
 let _newsError=null;
 let _newsDeployError=false;
 
+function _newsOpenUrl(el){window.open(el.dataset.href,'_blank');}
 function _newsCfg(){
   try{const s=localStorage.getItem('hr_news_cfg');if(s)return JSON.parse(s);}catch(e){}
   return {countries:['GN','CI'],companies:[..._NEWS_DEFAULT_COMPANIES],timeRange:30};
@@ -3604,7 +3605,7 @@ function renderNewsBody(cfg){
         ${item.company?`<span class="news-card-badge other">🏢 ${escHtml(item.company)}</span>`:''}
         <span class="news-card-date">${item.date||''}</span>
       </div>
-      <div class="news-card-title-zh" onclick="window.open(${JSON.stringify(item.url)},'_blank')">${escHtml(titleZh)}</div>
+      <div class="news-card-title-zh" data-href="${escHtml(item.url||'')}" onclick="_newsOpenUrl(this)">${escHtml(titleZh)}</div>
       ${titleFr?`<div class="news-card-title-fr">${escHtml(titleFr)}</div>`:''}
       ${item.snippet?`<div class="news-card-snippet">${escHtml(item.snippet)}</div>`:''}
     </div>`;
@@ -3790,6 +3791,29 @@ async function fetchNews(){
     }
     const data=await resp.json();
     if(data.error)throw new Error(data.error);
+    const allItems=[...(data.labor||[]),...(data.mining||[]),...(data.hr||[])];
+    const needTrans=allItems.filter(i=>!i.titleZh&&i.titleFr);
+    if(needTrans.length){
+      try{
+        const titles=needTrans.map(i=>i.titleFr);
+        const q=titles.map(t=>`&q=${encodeURIComponent(t)}`).join('');
+        const r=await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=fr&tl=zh-CN&dt=t${q}`);
+        if(r.ok){
+          const j=await r.json();
+          const translated=Array.isArray(j[0])?j[0].map(x=>x[0]).join(''):'';
+          // batch returns one block; split by line if multiple
+          const lines=translated.split('\n');
+          needTrans.forEach((item,idx)=>{item.titleZh=lines[idx]||item.titleFr;});
+        }
+      }catch(e){console.warn('translate fallback failed',e);}
+      // second attempt: translate one by one for items still missing
+      await Promise.all(needTrans.filter(i=>!i.titleZh).map(async item=>{
+        try{
+          const r=await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=fr&tl=zh-CN&dt=t&q=${encodeURIComponent(item.titleFr)}`);
+          if(r.ok){const j=await r.json();item.titleZh=j[0]?.map(x=>x[0]).join('')||item.titleFr;}
+        }catch(e){}
+      }));
+    }
     _newsResults={
       labor:(data.labor||[]).slice(0,40),
       mining:(data.mining||[]).slice(0,40),
