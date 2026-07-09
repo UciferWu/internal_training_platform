@@ -3534,11 +3534,48 @@ const ECOWAS_COUNTRIES=[
   {code:'CI',name:'科特迪瓦',en:"Côte d'Ivoire",fr:"Côte d'Ivoire",flag:'🇨🇮'},
 ];
 const _NEWS_DEFAULT_COMPANIES=['SMB','CBG','CBK','Rio Tinto','Anglo American','Winning International','中国铝业','CPDM'];
-let _newsTab='labor';
+let _newsTab='all';
 let _newsLoading=false;
-let _newsResults={labor:[],mining:[],hr:[],fetchedAt:null};
+let _newsResults={all:[],labor:[],mining:[],hr:[],fetchedAt:null};
 let _newsError=null;
 let _newsDeployError=false;
+
+// 关键词分类
+const _KW_LABOR=['travail','emploi','salarié','salaire','syndicat','grève','licenciement','contrat de travail','inspection du travail','code du travail','CNSS','retraite','cotisation','convention collective','chômage','sécurité sociale','droit du travail','travailleurs'];
+const _KW_MINING=['mine','minier','minerai','bauxite','or','cobalt','fer','extraction','exploitation minière','concession','alumine','RUSAL','CBG','SMB','CBK','pétrole','hydrocarbure','ressources naturelles','industrie extractive','Winning','Anglo American'];
+const _KW_HR=['accident de travail','blessé','décès','mort au travail','sécurité au travail','DRH','directeur général','recrutement','licencié','grève','formation professionnelle','personnel','ressources humaines','syndicat','manifestation','protestation'];
+function _newsClassify(item,companies){
+  const text=((item.titleFr||item.title||'')+' '+(item.snippet||'')).toLowerCase();
+  if((companies||[]).some(co=>co&&text.includes(co.toLowerCase())))return'hr';
+  if(_KW_MINING.some(k=>text.includes(k)))return'mining';
+  if(_KW_LABOR.some(k=>text.includes(k)))return'labor';
+  if(_KW_HR.some(k=>text.includes(k)))return'hr';
+  return'other';
+}
+
+// 客户端翻译（浏览器可访问 Google Translate 非官方 API）
+async function _transOne(text){
+  try{
+    const r=await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=fr&tl=zh-CN&dt=t&q=${encodeURIComponent(text)}`,{signal:AbortSignal.timeout(6000)});
+    if(!r.ok)return text;
+    const j=await r.json();
+    return j[0]?.map(x=>x?.[0]).filter(Boolean).join('')||text;
+  }catch{return text;}
+}
+async function _newsTranslateAsync(allItems){
+  const queue=allItems.filter(i=>!i.titleZh&&(i.titleFr||i.title));
+  for(let i=0;i<queue.length;i+=5){
+    await Promise.all(queue.slice(i,i+5).map(async item=>{
+      item.titleZh=await _transOne(item.titleFr||item.title||'');
+    }));
+    if(!_newsLoading){
+      const body=document.getElementById('news-body');
+      const st=body?.scrollTop||0;
+      renderNewsBody();
+      if(body)body.scrollTop=st;
+    }
+  }
+}
 
 function _newsOpenUrl(el){window.open(el.dataset.href,'_blank');}
 function _newsCfg(){
@@ -3566,7 +3603,15 @@ function _newsToolbarHtml(cfg){
   </div>`;
 }
 function _newsTabBarHtml(){
-  const tabs=[{id:'labor',label:'📋 劳动法规'},{id:'mining',label:'⛏ 矿业/基础设施法规'},{id:'hr',label:'👥 企业人力动态'},{id:'settings',label:'⚙ 设置'}];
+  const cnt=t=>(_newsResults[t]||[]).length;
+  const badge=t=>cnt(t)?`<span style="font-size:10px;background:var(--primary);color:#fff;border-radius:99px;padding:1px 5px;margin-left:4px">${cnt(t)}</span>`:'';
+  const tabs=[
+    {id:'all',label:`📰 全部${badge('all')}`},
+    {id:'labor',label:`📋 劳动法规${badge('labor')}`},
+    {id:'mining',label:`⛏ 矿业法规${badge('mining')}`},
+    {id:'hr',label:`👥 企业人力${badge('hr')}`},
+    {id:'settings',label:'⚙ 设置'},
+  ];
   return `<div class="news-tab-bar">${tabs.map(t=>`<div class="news-tab${_newsTab===t.id?' active':''}" onclick="newsSetTab('${t.id}')">${t.label}</div>`).join('')}</div>`;
 }
 function renderNewsBody(cfg){
@@ -3582,7 +3627,7 @@ function renderNewsBody(cfg){
     body.innerHTML=`<div class="news-empty"><span style="font-size:36px">⚠️</span><div style="font-size:14px;font-weight:500">搜索失败</div><div style="font-size:12px">${escHtml(_newsError)}</div><button class="btn" onclick="fetchNews()">重试</button></div>`;
     return;
   }
-  const items=_newsResults[_newsTab]||[];
+  const items=_newsResults[_newsTab==='all'?'all':_newsTab]||[];
   if(!items.length&&!_newsResults.fetchedAt){
     body.innerHTML=`<div class="news-empty"><span style="font-size:48px">📰</span><p style="font-weight:600;font-size:15px">点击"搜索动态"获取最新人力新闻</p><p style="font-size:12px">将搜索劳动法规、矿业法规及企业人力事件的最新公开信息</p><button class="btn btn-primary" onclick="fetchNews()" style="margin-top:8px">🔍 开始搜索</button></div>`;
     return;
@@ -3644,89 +3689,74 @@ function _newsSettingsHtml(cfg){
   </div>
   </div>`;
 }
-function _unused_newsEdgeFnCode(){
+// ── 新版 Edge Function 代码（需在 Supabase Dashboard 部署到 hr-news）──
+// 与旧版区别：直接抓 24 个本地新闻网站 RSS，返回 {items:[]} 扁平数组，不在服务端分类
+function _newsEdgeFnCode(){
   return `import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-
-const cors = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
-
-const COUNTRY_MAP: Record<string,{en:string,fr:string}> = {
-  GN:{en:'Guinea',fr:'Guinée'}, CI:{en:"Côte d'Ivoire",fr:"Côte d'Ivoire"},
-  SN:{en:'Senegal',fr:'Sénégal'}, ML:{en:'Mali',fr:'Mali'},
-  BF:{en:'Burkina Faso',fr:'Burkina Faso'}, NE:{en:'Niger',fr:'Niger'},
-  GH:{en:'Ghana',fr:'Ghana'}, NG:{en:'Nigeria',fr:'Nigeria'},
-  TG:{en:'Togo',fr:'Togo'}, BJ:{en:'Benin',fr:'Bénin'},
-  LR:{en:'Liberia',fr:'Liberia'}, SL:{en:'Sierra Leone',fr:'Sierra Leone'},
-  GM:{en:'Gambia',fr:'Gambie'}, GW:{en:'Guinea-Bissau',fr:'Guinée-Bissau'},
-  CV:{en:'Cape Verde',fr:'Cap-Vert'},
-}
-
-function rssUrl(q: string): string {
-  return \`https://news.google.com/rss/search?q=\${encodeURIComponent(q)}&hl=fr&gl=FR&ceid=FR:fr\`
-}
-
-async function fetchRSS(url: string): Promise<any[]> {
+const cors = {'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'authorization,content-type'}
+const SITES = [
+  {u:'https://www.guineematin.com/feed/',c:'GN',s:'Guineematin'},
+  {u:'https://africaguinee.com/feed/',c:'GN',s:'Africa Guinée'},
+  {u:'https://www.ledjely.com/feed/',c:'GN',s:'Le Djely'},
+  {u:'https://guinee7.com/feed/',c:'GN',s:'Guinée 7'},
+  {u:'https://www.lejournaldeguinee.com/feed/',c:'GN',s:'Journal de Guinée'},
+  {u:'https://guineeactuelle.com/feed/',c:'GN',s:'Guinée Actuelle'},
+  {u:'https://mediaguinee.org/feed/',c:'GN',s:'Media Guinée'},
+  {u:'https://conakrylive.com/feed/',c:'GN',s:'Conakry Live'},
+  {u:'https://www.iguinee.net/feed/',c:'GN',s:'iGuinée'},
+  {u:'https://guineepeople.com/feed/',c:'GN',s:'Guinée People'},
+  {u:'https://www.fratmat.info/feed/',c:'CI',s:'Fraternité Matin'},
+  {u:'https://koaci.com/feed/',c:'CI',s:'KOACI'},
+  {u:'https://www.linfodrome.com/feed/',c:'CI',s:"L'Infodrome"},
+  {u:'https://connectionivoirienne.net/feed/',c:'CI',s:'Connection Ivoirienne'},
+  {u:'https://www.ivoirematin.com/feed/',c:'CI',s:'Ivoire Matin'},
+  {u:'https://www.soir-info.com/feed/',c:'CI',s:'Soir Info'},
+  {u:'https://www.ledebativoirien.com/feed/',c:'CI',s:'Le Débat Ivoirien'},
+  {u:'https://news.abidjan.net/rss/',c:'CI',s:'Abidjan.net'},
+  {u:'https://www.rfi.fr/fr/rss-afrique.xml',c:'REG',s:'RFI Afrique'},
+  {u:'https://www.jeuneafrique.com/feed/',c:'REG',s:'Jeune Afrique'},
+  {u:'https://www.agenceecofin.com/rss',c:'REG',s:'Agence Ecofin'},
+  {u:'https://www.mining.com/feed/',c:'REG',s:'Mining.com'},
+]
+async function fetchSite(site: {u:string,c:string,s:string}): Promise<any[]> {
   try {
-    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
+    const r = await fetch(site.u, {headers:{'User-Agent':'Mozilla/5.0 (compatible; HRNewsBot/2.0)'},signal:AbortSignal.timeout(9000)})
     if (!r.ok) return []
     const xml = await r.text()
     const items: any[] = []
     const re = /<item>([\s\S]*?)<\/item>/g
-    let m: RegExpExecArray | null
-    while ((m = re.exec(xml)) !== null) {
+    let m: RegExpExecArray|null
+    while ((m = re.exec(xml)) !== null && items.length < 20) {
       const b = m[1]
-      const title = (b.match(/<title><!\[CDATA\[(.*?)\]\]>/)?.[1] ?? b.match(/<title>(.*?)<\/title>/)?.[1] ?? '').trim()
-      const link = (b.match(/<link>(.*?)<\/link>/)?.[1] ?? '').trim()
-      const pub = b.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] ?? ''
-      const src = (b.match(/<source[^>]*>(.*?)<\/source>/)?.[1] ?? '').trim()
-      const desc = (b.match(/<description><!\[CDATA\[(.*?)\]\]>/)?.[1] ?? b.match(/<description>(.*?)<\/description>/)?.[1] ?? '').replace(/<[^>]+>/g, '').trim()
-      if (title && link) {
-        items.push({ title: title.replace(/<[^>]+>/g,''), url: link, source: src,
-          date: pub ? new Date(pub).toISOString().split('T')[0] : '', snippet: desc.slice(0,280) })
-      }
-      if (items.length >= 8) break
+      const titleFr = (b.match(/<title><!\[CDATA\[(.*?)\]\]>/)?.[1] || b.match(/<title[^>]*>(.*?)<\/title>/)?.[1] || '').replace(/<[^>]+>/g,'').trim()
+      const url = (b.match(/<link>(.*?)<\/link>/)?.[1] || b.match(/<guid isPermaLink="true">(.*?)<\/guid>/)?.[1] || '').trim()
+      const pub = b.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] || ''
+      const snippet = (b.match(/<description><!\[CDATA\[(.*?)\]\]>/)?.[1] || b.match(/<description[^>]*>(.*?)<\/description>/)?.[1] || '').replace(/<[^>]+>/g,'').trim()
+      if (titleFr && url) items.push({titleFr, url, source:site.s, country:site.c, date:pub?new Date(pub).toISOString().split('T')[0]:'', snippet:snippet.slice(0,200)})
     }
     return items
   } catch { return [] }
 }
-
 serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response(null, { headers: cors })
+  if (req.method === 'OPTIONS') return new Response(null, {headers:cors})
   try {
-    const { countries = ['GN','CI'], companies = [], timeRange = 30 } = await req.json()
-    const tw = \`when:\${timeRange}d\`
-    const labor: any[] = [], mining: any[] = [], hr: any[] = []
-    const tasks: Promise<void>[] = []
-
-    for (const code of countries) {
-      const c = COUNTRY_MAP[code]; if (!c) continue
-      tasks.push(fetchRSS(rssUrl(\`"\${c.fr}" "code du travail" OR "droit du travail" OR emploi \${tw}\`))
-        .then(a => a.forEach(i => labor.push({...i, category:'labor', country:code}))))
-      tasks.push(fetchRSS(rssUrl(\`"\${c.en}" labor law OR employment law OR workers rights \${tw}\`))
-        .then(a => a.forEach(i => labor.push({...i, category:'labor', country:code}))))
-      tasks.push(fetchRSS(rssUrl(\`"\${c.fr}" "code minier" OR mine OR infrastructure loi \${tw}\`))
-        .then(a => a.forEach(i => mining.push({...i, category:'mining', country:code}))))
-      tasks.push(fetchRSS(rssUrl(\`"\${c.en}" mining law OR mineral regulation OR infrastructure regulation \${tw}\`))
-        .then(a => a.forEach(i => mining.push({...i, category:'mining', country:code}))))
-    }
-
-    for (const company of companies) {
-      tasks.push(fetchRSS(rssUrl(\`"\${company}" grève OR strike OR syndicat OR accident OR licenciement \${tw}\`))
-        .then(a => a.forEach(i => hr.push({...i, category:'hr', company}))))
-      tasks.push(fetchRSS(rssUrl(\`"\${company}" directeur OR CEO OR recrutement OR workers OR employees \${tw}\`))
-        .then(a => a.forEach(i => hr.push({...i, category:'hr', company}))))
-    }
-
-    await Promise.all(tasks)
-    const dedup = (arr: any[]) => { const seen = new Set<string>(); return arr.filter(i => { if(seen.has(i.url))return false; seen.add(i.url); return true }) }
-    return new Response(JSON.stringify({
-      labor: dedup(labor).slice(0,40), mining: dedup(mining).slice(0,40), hr: dedup(hr).slice(0,40),
-      fetchedAt: new Date().toISOString(),
-    }), { headers: {...cors, 'Content-Type': 'application/json'} })
+    const body = await req.json().catch(()=>({}))
+    const countries: string[] = body.countries || ['GN','CI']
+    const timeRange: number = body.timeRange || 30
+    const sites = SITES.filter(s => countries.includes(s.c) || s.c === 'REG')
+    const results = await Promise.all(sites.map(fetchSite))
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - timeRange)
+    const seen = new Set<string>()
+    const all = results.flat()
+      .filter(i => {
+        if (seen.has(i.url)) return false; seen.add(i.url)
+        return !i.date || new Date(i.date) >= cutoff
+      })
+      .sort((a,b) => (b.date||'').localeCompare(a.date||''))
+      .slice(0, 300)
+    return new Response(JSON.stringify({items:all, fetchedAt:new Date().toISOString()}), {headers:{...cors,'Content-Type':'application/json'}})
   } catch(e: any) {
-    return new Response(JSON.stringify({error: e.message}), { status:500, headers:{...cors,'Content-Type':'application/json'} })
+    return new Response(JSON.stringify({error:e.message}), {status:500, headers:{...cors,'Content-Type':'application/json'}})
   }
 })`;
 }
@@ -3791,43 +3821,38 @@ async function fetchNews(){
     }
     const data=await resp.json();
     if(data.error)throw new Error(data.error);
-    const allItems=[...(data.labor||[]),...(data.mining||[]),...(data.hr||[])];
-    const needTrans=allItems.filter(i=>!i.titleZh&&i.titleFr);
-    if(needTrans.length){
-      try{
-        const titles=needTrans.map(i=>i.titleFr);
-        const q=titles.map(t=>`&q=${encodeURIComponent(t)}`).join('');
-        const r=await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=fr&tl=zh-CN&dt=t${q}`);
-        if(r.ok){
-          const j=await r.json();
-          const translated=Array.isArray(j[0])?j[0].map(x=>x[0]).join(''):'';
-          // batch returns one block; split by line if multiple
-          const lines=translated.split('\n');
-          needTrans.forEach((item,idx)=>{item.titleZh=lines[idx]||item.titleFr;});
-        }
-      }catch(e){console.warn('translate fallback failed',e);}
-      // second attempt: translate one by one for items still missing
-      await Promise.all(needTrans.filter(i=>!i.titleZh).map(async item=>{
-        try{
-          const r=await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=fr&tl=zh-CN&dt=t&q=${encodeURIComponent(item.titleFr)}`);
-          if(r.ok){const j=await r.json();item.titleZh=j[0]?.map(x=>x[0]).join('')||item.titleFr;}
-        }catch(e){}
-      }));
+    // 兼容新格式 {items:[]} 和旧格式 {labor:[],mining:[],hr:[]}
+    let allItems=[],labor=[],mining=[],hr=[];
+    if(Array.isArray(data.items)){
+      allItems=data.items.slice(0,300);
+      allItems.forEach(i=>{if(!i.titleFr)i.titleFr=i.title||'';});
+      const seen=new Set();
+      allItems=allItems.filter(i=>{if(!i.url||seen.has(i.url))return false;seen.add(i.url);return true;});
+      const companies=cfg.companies||[];
+      allItems.forEach(i=>{
+        const cat=_newsClassify(i,companies);
+        if(cat==='labor')labor.push(i);
+        else if(cat==='mining')mining.push(i);
+        else if(cat==='hr')hr.push(i);
+      });
+    }else{
+      labor=(data.labor||[]).slice(0,60);
+      mining=(data.mining||[]).slice(0,60);
+      hr=(data.hr||[]).slice(0,60);
+      [...labor,...mining,...hr].forEach(i=>{if(!i.titleFr)i.titleFr=i.title||'';});
+      const seen=new Set();
+      allItems=[...labor,...mining,...hr].filter(i=>{if(!i.url||seen.has(i.url))return false;seen.add(i.url);return true;});
     }
-    _newsResults={
-      labor:(data.labor||[]).slice(0,40),
-      mining:(data.mining||[]).slice(0,40),
-      hr:(data.hr||[]).slice(0,40),
-      fetchedAt:data.fetchedAt||new Date().toISOString()
-    };
-    _newsError=null;
-    if(!_newsResults.labor.length&&!_newsResults.mining.length&&!_newsResults.hr.length)
-      _newsError='未获取到新闻，请稍后重试';
+    _newsResults={all:allItems,labor,mining,hr,fetchedAt:data.fetchedAt||new Date().toISOString()};
+    _newsError=allItems.length?null:'未获取到新闻，请稍后重试';
   }catch(e){
-    if(e.message==='Edge function not deployed'){_newsDeployError=true;}
-    else{_newsError=e.message;}
+    if(e.message==='Edge function not deployed')_newsDeployError=true;
+    else _newsError=e.message;
   }
-  _newsLoading=false;renderNews();
+  _newsLoading=false;
+  renderNews();
+  // 后台异步翻译（逐条，保持滚动位置）
+  if(_newsResults.all.length) _newsTranslateAsync(_newsResults.all);
 }
 function newsToggleCountry(code){
   const cfg=_newsCfg();
