@@ -3869,10 +3869,10 @@ async function fetchNews(){
     _newsResults={all:allItems,labor,mining,hr,fetchedAt:data.fetchedAt||new Date().toISOString()};
     if(!allItems.length){
       const dbg=data.debug;
-      const ok=dbg?dbg.filter((d:any)=>d.count>0).length:0;
-      const fail=dbg?dbg.filter((d:any)=>d.err).length:0;
+      const ok=dbg?dbg.filter(d=>d.count>0).length:0;
+      const fail=dbg?dbg.filter(d=>d.err).length:0;
       _newsError=dbg
-        ?`未获取到新闻（共检查 ${dbg.length} 个站点，${ok} 个成功，${fail} 个失败）\n失败示例：${dbg.find((d:any)=>d.err)?.err||''}`
+        ?`未获取到新闻（共检查 ${dbg.length} 个站点，${ok} 个成功，${fail} 个失败）\n失败示例：${dbg.find(d=>d.err)?.err||''}`
         :'未获取到新闻，请稍后重试';
     }
   }catch(e){
