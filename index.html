@@ -3544,6 +3544,19 @@ let _newsDeployError=false;
 const _KW_LABOR=['travail','emploi','salarié','salaire','syndicat','grève','licenciement','contrat de travail','inspection du travail','code du travail','CNSS','retraite','cotisation','convention collective','chômage','sécurité sociale','droit du travail','travailleurs'];
 const _KW_MINING=['mine','minier','minerai','bauxite','or','cobalt','fer','extraction','exploitation minière','concession','alumine','RUSAL','CBG','SMB','CBK','pétrole','hydrocarbure','ressources naturelles','industrie extractive','Winning','Anglo American'];
 const _KW_HR=['accident de travail','blessé','décès','mort au travail','sécurité au travail','DRH','directeur général','recrutement','licencié','grève','formation professionnelle','personnel','ressources humaines','syndicat','manifestation','protestation'];
+// 国家相关性关键词（用于过滤 REG 源的非相关文章）
+const _COUNTRY_KW={
+  GN:['guinée','guinea','guinéen','guinéenne','conakry','kankan','labé','kindia','boké','faranah','nzérékoré','mamou','guineam','guinea\'s'],
+  CI:["côte d'ivoire","cote d'ivoire",'ivoirien','ivoirienne','abidjan','yamoussoukro','bouaké','san-pédro','san pedro','daloa','korhogo'],
+};
+// 判断文章是否与所选国家相关
+// - 国别专属站（GN/CI）直接通过
+// - REG 源必须在标题/摘要中提到所选国家
+function _newsRelevant(item,countries){
+  if(!item.country||item.country!=='REG')return true; // 国别专属站直接通过
+  const text=((item.titleFr||item.title||'')+' '+(item.snippet||'')).toLowerCase();
+  return countries.some(code=>(_COUNTRY_KW[code]||[]).some(kw=>text.includes(kw)));
+}
 function _newsClassify(item,companies){
   const text=((item.titleFr||item.title||'')+' '+(item.snippet||'')).toLowerCase();
   if((companies||[]).some(co=>co&&text.includes(co.toLowerCase())))return'hr';
@@ -3850,7 +3863,12 @@ async function fetchNews(){
       allItems=data.items.slice(0,300);
       allItems.forEach(i=>{if(!i.titleFr)i.titleFr=i.title||'';});
       const seen=new Set();
-      allItems=allItems.filter(i=>{if(!i.url||seen.has(i.url))return false;seen.add(i.url);return true;});
+      // 去重 + 过滤 REG 源中与所选国家无关的文章
+      allItems=allItems.filter(i=>{
+        if(!i.url||seen.has(i.url))return false;
+        seen.add(i.url);
+        return _newsRelevant(i,cfg.countries);
+      });
       const companies=cfg.companies||[];
       allItems.forEach(i=>{
         const cat=_newsClassify(i,companies);
@@ -3864,7 +3882,11 @@ async function fetchNews(){
       hr=(data.hr||[]).slice(0,60);
       [...labor,...mining,...hr].forEach(i=>{if(!i.titleFr)i.titleFr=i.title||'';});
       const seen=new Set();
-      allItems=[...labor,...mining,...hr].filter(i=>{if(!i.url||seen.has(i.url))return false;seen.add(i.url);return true;});
+      allItems=[...labor,...mining,...hr].filter(i=>{
+        if(!i.url||seen.has(i.url))return false;
+        seen.add(i.url);
+        return _newsRelevant(i,cfg.countries);
+      });
     }
     _newsResults={all:allItems,labor,mining,hr,fetchedAt:data.fetchedAt||new Date().toISOString()};
     if(!allItems.length){
