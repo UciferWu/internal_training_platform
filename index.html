@@ -1267,6 +1267,8 @@ const db = {
   async saveArchFile(f)         { const t=_archFileTbl(); const {error}=await _sb.from(t).upsert({id:f.id,cat_id:f.catId,name:f.name,ext:f.ext,size:f.size,date:f.date,data_url:f.dataUrl||''});if(error)throw error; },
   async deleteArchFile(id)      { const t=_archFileTbl(); const {error}=await _sb.from(t).delete().eq('id',id);if(error)throw error; },
   async saveArchFilesOrder(files){ const t=_archFileTbl(); const res=await Promise.all(files.map((f,i)=>_sb.from(t).update({sort_order:i}).eq('id',f.id)));const err=res.find(r=>r.error);if(err)throw err.error; },
+  // create table if not exists news_settings (id int primary key default 1, companies jsonb default '[]', countries jsonb default '["GN","CI"]', time_range int default 30);
+  async saveNewsSettings(cfg){ const {error}=await _sb.from('news_settings').upsert({id:1,companies:cfg.companies||[],countries:cfg.countries||['GN','CI'],time_range:cfg.timeRange||30});if(error)throw error; },
 };
 // 乐观更新辅助：UI 立即更新，后台存储，失败时提示
 function dbSave(promise){ promise.catch(e=>showToast('数据同步失败：'+e.message,'error')); }
@@ -3245,7 +3247,8 @@ async function initDB(){
       {data:archFileRows,error:afe},
       {data:compRows,  error:ce},
       {data:archCatCiRows,error:acce},
-      {data:archFileCiRows,error:afce}
+      {data:archFileCiRows,error:afce},
+      {data:newsSettingsRow,error:nse}
     ] = await Promise.all([
       _sb.from('projects').select('*'),
       _sb.from('users').select('*'),
@@ -3271,6 +3274,7 @@ async function initDB(){
       _sb.from('competitors').select('*'),
       _sb.from('arch_categories_ci').select('*').order('sort_order'),
       _sb.from('arch_files_ci').select('*').order('sort_order'),
+      _sb.from('news_settings').select('*').eq('id',1).maybeSingle(),
     ]);
 
     // ── Projects ──
@@ -3370,6 +3374,17 @@ async function initDB(){
       const safeCompIds=compRows.map(c=>Number(c.id)).filter(id=>id>0&&id<2_000_000_000);
       competitorIdSeq=safeCompIds.length?Math.max(...safeCompIds,competitorIdSeq):competitorIdSeq;
       COMPETITORS.forEach(c=>addCompetitorMarker(c));
+    }
+
+    // ── News Settings（人力新闻关注企业） ──
+    if(!nse&&newsSettingsRow){
+      const dbCfg={
+        companies:newsSettingsRow.companies||[..._NEWS_DEFAULT_COMPANIES],
+        countries:newsSettingsRow.countries||['GN','CI'],
+        timeRange:newsSettingsRow.time_range||30,
+      };
+      // 用数据库数据覆盖 localStorage 缓存
+      localStorage.setItem('hr_news_cfg',JSON.stringify(dbCfg));
     }
 
   }catch(e){
@@ -3540,10 +3555,42 @@ let _newsResults={all:[],labor:[],mining:[],hr:[],fetchedAt:null};
 let _newsError=null;
 let _newsDeployError=false;
 
-// 关键词分类
-const _KW_LABOR=['travail','emploi','salarié','salaire','syndicat','grève','licenciement','contrat de travail','inspection du travail','code du travail','CNSS','retraite','cotisation','convention collective','chômage','sécurité sociale','droit du travail','travailleurs'];
-const _KW_MINING=['mine','minier','minerai','bauxite','or','cobalt','fer','extraction','exploitation minière','concession','alumine','RUSAL','CBG','SMB','CBK','pétrole','hydrocarbure','ressources naturelles','industrie extractive','Winning','Anglo American'];
-const _KW_HR=['accident de travail','blessé','décès','mort au travail','sécurité au travail','DRH','directeur général','recrutement','licencié','grève','formation professionnelle','personnel','ressources humaines','syndicat','manifestation','protestation'];
+// 关键词分类（法语 + 英语）
+const _KW_LABOR=[
+  // 法语
+  'travail','emploi','salarié','salaire','syndicat','grève','licenciement','contrat de travail',
+  'inspection du travail','code du travail','CNSS','retraite','cotisation','convention collective',
+  'chômage','sécurité sociale','droit du travail','travailleurs','effectifs','embauche',
+  'rupture conventionnelle','démission','indemnité','congé payé','temps de travail',
+  'conflit social','négociation sociale','partenaires sociaux','dialogue social',
+  // 英语
+  'labor','labour','worker','workers','employee','employees','salary','wage','wages',
+  'strike','union','trade union','layoff','dismissal','employment contract','social security',
+  'workforce','hire','hiring','pension','redundancy','collective agreement',
+];
+const _KW_MINING=[
+  // 法语
+  'mine','minier','minière','minerai','bauxite','or ','cobalt','fer','extraction',
+  'exploitation minière','concession minière','alumine','RUSAL','CBG','SMB','CBK',
+  'pétrole','hydrocarbure','ressources naturelles','industrie extractive',
+  'Winning','Anglo American','Rio Tinto','gisement','carrière','foreuse',
+  'Simfer','Société minière','SMD','Endeavour',
+  // 英语
+  'mining','mineral','mine ','bauxite','gold mine','cobalt','iron ore','extraction',
+  'quarry','ore deposit','refinery','smelter','RUSAL','SMB','CBG','CBK',
+  'Rio Tinto','Winning','petroleum','hydrocarbon','natural resources',
+];
+const _KW_HR=[
+  // 法语
+  'accident de travail','blessé','décès au travail','mort au travail','sécurité au travail',
+  'DRH','directeur des ressources humaines','recrutement','licencié','formation professionnelle',
+  'personnel','ressources humaines','manifestation','protestation','arrêt de travail',
+  'conditions de travail','bien-être au travail','harcèlement','discrimination',
+  // 英语
+  'work accident','workplace safety','occupational health','fatality','injured worker',
+  'human resources','HR director','recruitment','staff','labour dispute',
+  'protest','demonstration','workers rights','working conditions',
+];
 // 国家相关性关键词（用于过滤 REG 源的非相关文章）
 const _COUNTRY_KW={
   GN:['guinée','guinea','guinéen','guinéenne','conakry','kankan','labé','kindia','boké','faranah','nzérékoré','mamou','guineam','guinea\'s'],
@@ -3595,7 +3642,10 @@ function _newsCfg(){
   try{const s=localStorage.getItem('hr_news_cfg');if(s)return JSON.parse(s);}catch(e){}
   return {countries:['GN','CI'],companies:[..._NEWS_DEFAULT_COMPANIES],timeRange:30};
 }
-function _newsSaveCfg(cfg){localStorage.setItem('hr_news_cfg',JSON.stringify(cfg));}
+function _newsSaveCfg(cfg){
+  localStorage.setItem('hr_news_cfg',JSON.stringify(cfg));
+  dbSave(db.saveNewsSettings(cfg)); // 异步持久化到数据库
+}
 
 function renderNews(){
   const cfg=_newsCfg();
@@ -3747,7 +3797,7 @@ async function fetchSite(site: {u:string,c:string,s:string}): Promise<{items:any
     const items: any[] = []
     const re = /<item>([\s\\S]*?)<\\/item>/g
     let m: RegExpExecArray|null
-    while ((m = re.exec(xml)) !== null && items.length < 20) {
+    while ((m = re.exec(xml)) !== null && items.length < 100) {
       const b = m[1]
       const titleFr = (b.match(/<title><!\\[CDATA\\[(.*?)\\]\\]>/)?.[1] || b.match(/<title[^>]*>(.*?)<\\/title>/)?.[1] || '').replace(/<[^>]+>/g,'').trim()
       const url = (b.match(/<link>(.*?)<\\/link>/)?.[1] || b.match(/<guid[^>]*>(.*?)<\\/guid>/)?.[1] || '').trim()
@@ -3790,7 +3840,7 @@ serve(async (req) => {
       })
     })
     all.sort((a,b) => (b.date||'').localeCompare(a.date||''))
-    return new Response(JSON.stringify({items:all.slice(0,300), fetchedAt:new Date().toISOString(), debug:debugSites, total:all.length}), {headers:{...cors,'Content-Type':'application/json'}})
+    return new Response(JSON.stringify({items:all.slice(0,2000), fetchedAt:new Date().toISOString(), debug:debugSites, total:all.length}), {headers:{...cors,'Content-Type':'application/json'}})
   } catch(e: any) {
     return new Response(JSON.stringify({error:e.message}), {status:500, headers:{...cors,'Content-Type':'application/json'}})
   }
@@ -3860,7 +3910,7 @@ async function fetchNews(){
     // 兼容新格式 {items:[]} 和旧格式 {labor:[],mining:[],hr:[]}
     let allItems=[],labor=[],mining=[],hr=[];
     if(Array.isArray(data.items)){
-      allItems=data.items.slice(0,300);
+      allItems=data.items.slice(0,2000);
       allItems.forEach(i=>{if(!i.titleFr)i.titleFr=i.title||'';});
       const seen=new Set();
       // 去重 + 过滤 REG 源中与所选国家无关的文章
@@ -3872,10 +3922,13 @@ async function fetchNews(){
       const companies=cfg.companies||[];
       allItems.forEach(i=>{
         const cat=_newsClassify(i,companies);
+        i._cat=cat; // 记录分类结果，供全部 tab 用
         if(cat==='labor')labor.push(i);
         else if(cat==='mining')mining.push(i);
         else if(cat==='hr')hr.push(i);
       });
+      // 全部 tab 只显示有意义分类的文章，过滤掉无关的体育/政治/文化等
+      allItems=allItems.filter(i=>i._cat&&i._cat!=='other');
     }else{
       labor=(data.labor||[]).slice(0,60);
       mining=(data.mining||[]).slice(0,60);
