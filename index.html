@@ -3767,6 +3767,7 @@ const SITES = [
   {u:'https://www.lemonde.fr/afrique/rss_full.xml',c:'REG',s:'Le Monde Afrique'},
   // 几内亚
   {u:'https://www.guineematin.com/feed/',c:'GN',s:'Guineematin'},
+  {u:'https://guineenews.org/feed/',c:'GN',s:'Guinéenews'},
   {u:'https://africaguinee.com/feed/',c:'GN',s:'Africa Guinée'},
   {u:'https://www.ledjely.com/feed/',c:'GN',s:'Le Djely'},
   {u:'https://guinee7.com/feed/',c:'GN',s:'Guinée 7'},
@@ -3774,6 +3775,10 @@ const SITES = [
   {u:'https://guineeactuelle.com/feed/',c:'GN',s:'Guinée Actuelle'},
   {u:'https://mediaguinee.org/feed/',c:'GN',s:'Media Guinée'},
   {u:'https://conakrylive.com/feed/',c:'GN',s:'Conakry Live'},
+  {u:'https://aminata.com/feed/',c:'GN',s:'Aminata.com'},
+  {u:'https://www.conakryinfos.com/feed/',c:'GN',s:'Conakryinfos'},
+  {u:'https://www.visionguinee.info/feed/',c:'GN',s:'Vision Guinée'},
+  {u:'https://www.espacefmguinee.info/feed/',c:'GN',s:'Espace FM Guinée'},
   // 科特迪瓦
   {u:'https://www.fratmat.info/feed/',c:'CI',s:'Fraternité Matin'},
   {u:'https://koaci.com/feed/',c:'CI',s:'KOACI'},
@@ -3782,6 +3787,9 @@ const SITES = [
   {u:'https://www.ivoirematin.com/feed/',c:'CI',s:'Ivoire Matin'},
   {u:'https://www.soir-info.com/feed/',c:'CI',s:'Soir Info'},
   {u:'https://news.abidjan.net/rss/',c:'CI',s:'Abidjan.net'},
+  {u:'https://www.afriksoir.net/feed/',c:'CI',s:'Afriksoir'},
+  {u:'https://www.aip.ci/feed/',c:'CI',s:'AIP'},
+  {u:'https://afrique-sur7.ci/feed/',c:'CI',s:'Afrique sur 7'},
 ]
 async function fetchSite(site: {u:string,c:string,s:string}): Promise<{items:any[],err:string}> {
   const ctrl = new AbortController()
