@@ -508,6 +508,10 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','P
 .news-time-opt{padding:4px 12px;border-radius:6px;border:1.5px solid var(--border);font-size:12px;cursor:pointer;background:var(--surface);color:var(--text-secondary);white-space:nowrap;}
 .news-time-opt.active{border-color:var(--primary);background:var(--primary-light);color:var(--primary);font-weight:500;}
 .news-tab-bar{display:flex;background:var(--surface);border-bottom:1px solid var(--border);padding:0 12px;flex-shrink:0;overflow-x:auto;}
+.news-country-filter{display:flex;gap:6px;padding:8px 16px;background:var(--bg);border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto;}
+.news-cfilter{padding:4px 12px;border-radius:99px;border:1.5px solid var(--border);font-size:12px;cursor:pointer;background:var(--surface);color:var(--text-secondary);white-space:nowrap;user-select:none;transition:all .15s;}
+.news-cfilter.active{border-color:var(--primary);background:var(--primary-light);color:var(--primary);font-weight:600;}
+.news-cfilter:hover:not(.active){background:var(--border);}
 .news-tab{padding:10px 14px;font-size:13px;font-weight:500;color:var(--text-secondary);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;transition:color .15s;flex-shrink:0;}
 .news-tab.active{color:var(--primary);border-bottom-color:var(--primary);}
 .news-tab:hover:not(.active){color:var(--text-primary);}
@@ -3550,8 +3554,9 @@ const ECOWAS_COUNTRIES=[
 ];
 const _NEWS_DEFAULT_COMPANIES=['SMB','CBG','CBK','Rio Tinto','Anglo American','Winning International','中国铝业','CPDM'];
 let _newsTab='all';
+let _newsCountryFilter='all'; // 'all' | 'GN' | 'CI'
 let _newsLoading=false;
-let _newsResults={all:[],labor:[],mining:[],hr:[],fetchedAt:null};
+let _newsResults={all:[],labor:[],hr:[],fetchedAt:null};
 let _newsError=null;
 let _newsDeployError=false;
 
@@ -3567,18 +3572,6 @@ const _KW_LABOR=[
   'labor','labour','worker','workers','employee','employees','salary','wage','wages',
   'strike','union','trade union','layoff','dismissal','employment contract','social security',
   'workforce','hire','hiring','pension','redundancy','collective agreement',
-];
-const _KW_MINING=[
-  // 法语
-  'mine','minier','minière','minerai','bauxite','or ','cobalt','fer','extraction',
-  'exploitation minière','concession minière','alumine','RUSAL','CBG','SMB','CBK',
-  'pétrole','hydrocarbure','ressources naturelles','industrie extractive',
-  'Winning','Anglo American','Rio Tinto','gisement','carrière','foreuse',
-  'Simfer','Société minière','SMD','Endeavour',
-  // 英语
-  'mining','mineral','mine ','bauxite','gold mine','cobalt','iron ore','extraction',
-  'quarry','ore deposit','refinery','smelter','RUSAL','SMB','CBG','CBK',
-  'Rio Tinto','Winning','petroleum','hydrocarbon','natural resources',
 ];
 const _KW_HR=[
   // 法语
@@ -3607,7 +3600,6 @@ function _newsRelevant(item,countries){
 function _newsClassify(item,companies){
   const text=((item.titleFr||item.title||'')+' '+(item.snippet||'')).toLowerCase();
   if((companies||[]).some(co=>co&&text.includes(co.toLowerCase())))return'hr';
-  if(_KW_MINING.some(k=>text.includes(k)))return'mining';
   if(_KW_LABOR.some(k=>text.includes(k)))return'labor';
   if(_KW_HR.some(k=>text.includes(k)))return'hr';
   return'other';
@@ -3666,16 +3658,27 @@ function _newsToolbarHtml(cfg){
   </div>`;
 }
 function _newsTabBarHtml(){
-  const cnt=t=>(_newsResults[t]||[]).length;
-  const badge=t=>cnt(t)?`<span style="font-size:10px;background:var(--primary);color:#fff;border-radius:99px;padding:1px 5px;margin-left:4px">${cnt(t)}</span>`:'';
+  const total=(_newsResults.all||[]).length;
+  const badge=total?`<span style="font-size:10px;background:var(--primary);color:#fff;border-radius:99px;padding:1px 5px;margin-left:4px">${total}</span>`:'';
   const tabs=[
-    {id:'all',label:`📰 全部${badge('all')}`},
-    {id:'labor',label:`📋 劳动法规${badge('labor')}`},
-    {id:'mining',label:`⛏ 矿业法规${badge('mining')}`},
-    {id:'hr',label:`👥 企业人力${badge('hr')}`},
+    {id:'all',label:`📰 全部${badge}`},
     {id:'settings',label:'⚙ 设置'},
   ];
-  return `<div class="news-tab-bar">${tabs.map(t=>`<div class="news-tab${_newsTab===t.id?' active':''}" onclick="newsSetTab('${t.id}')">${t.label}</div>`).join('')}</div>`;
+  const tabBar=`<div class="news-tab-bar">${tabs.map(t=>`<div class="news-tab${_newsTab===t.id?' active':''}" onclick="newsSetTab('${t.id}')">${t.label}</div>`).join('')}</div>`;
+  // 国家筛选按钮（仅在有结果时显示）
+  if(!_newsResults.fetchedAt||_newsTab==='settings') return tabBar;
+  const cfg=_newsCfg();
+  const cfBtn=(code,label)=>{
+    const n=code==='all'?(_newsResults.all||[]).length:(_newsResults.all||[]).filter(i=>i.country===code).length;
+    const active=_newsCountryFilter===code;
+    return `<span class="news-cfilter${active?' active':''}" onclick="newsSetCountryFilter('${code}')">${label}${n?`<span style="font-size:10px;opacity:.8;margin-left:3px">${n}</span>`:''}</span>`;
+  };
+  const countryBtns=cfg.countries.map(code=>{
+    const c=ECOWAS_COUNTRIES.find(x=>x.code===code)||{code,flag:'',name:code};
+    return cfBtn(code,`${c.flag} ${c.name}`);
+  });
+  const filterBar=`<div class="news-country-filter">${cfBtn('all','🌍 全部')} ${countryBtns.join(' ')}</div>`;
+  return tabBar+filterBar;
 }
 function renderNewsBody(cfg){
   cfg=cfg||_newsCfg();
@@ -3690,9 +3693,10 @@ function renderNewsBody(cfg){
     body.innerHTML=`<div class="news-empty"><span style="font-size:36px">⚠️</span><div style="font-size:14px;font-weight:500">搜索失败</div><div style="font-size:12px">${escHtml(_newsError)}</div><button class="btn" onclick="fetchNews()">重试</button></div>`;
     return;
   }
-  const items=_newsResults[_newsTab==='all'?'all':_newsTab]||[];
+  let items=_newsResults.all||[];
+  if(_newsCountryFilter!=='all') items=items.filter(i=>i.country===_newsCountryFilter);
   if(!items.length&&!_newsResults.fetchedAt){
-    body.innerHTML=`<div class="news-empty"><span style="font-size:48px">📰</span><p style="font-weight:600;font-size:15px">点击"搜索动态"获取最新人力新闻</p><p style="font-size:12px">将搜索劳动法规、矿业法规及企业人力事件的最新公开信息</p><button class="btn btn-primary" onclick="fetchNews()" style="margin-top:8px">🔍 开始搜索</button></div>`;
+    body.innerHTML=`<div class="news-empty"><span style="font-size:48px">📰</span><p style="font-weight:600;font-size:15px">点击"搜索动态"获取最新人力新闻</p><p style="font-size:12px">将搜索劳动法规及企业人力事件的最新公开信息</p><button class="btn btn-primary" onclick="fetchNews()" style="margin-top:8px">🔍 开始搜索</button></div>`;
     return;
   }
   if(!items.length){
@@ -3900,7 +3904,7 @@ async function fetchNews(){
   if(_newsLoading)return;
   const cfg=_newsCfg();
   if(!cfg.countries.length){showToast('请至少选择一个国家','error');return;}
-  _newsLoading=true;_newsError=null;_newsDeployError=false;
+  _newsLoading=true;_newsError=null;_newsDeployError=false;_newsCountryFilter='all';
   renderNews();
   try{
     const resp=await fetch(`${SUPABASE_URL}/functions/v1/hr-news`,{
@@ -3915,8 +3919,8 @@ async function fetchNews(){
     }
     const data=await resp.json();
     if(data.error)throw new Error(data.error);
-    // 兼容新格式 {items:[]} 和旧格式 {labor:[],mining:[],hr:[]}
-    let allItems=[],labor=[],mining=[],hr=[];
+    // 兼容新格式 {items:[]} 和旧格式 {labor:[],hr:[]}
+    let allItems=[],labor=[],hr=[];
     if(Array.isArray(data.items)){
       allItems=data.items.slice(0,2000);
       allItems.forEach(i=>{if(!i.titleFr)i.titleFr=i.title||'';});
@@ -3932,24 +3936,22 @@ async function fetchNews(){
         const cat=_newsClassify(i,companies);
         i._cat=cat; // 记录分类结果，供全部 tab 用
         if(cat==='labor')labor.push(i);
-        else if(cat==='mining')mining.push(i);
         else if(cat==='hr')hr.push(i);
       });
       // 全部 tab 只显示有意义分类的文章，过滤掉无关的体育/政治/文化等
       allItems=allItems.filter(i=>i._cat&&i._cat!=='other');
     }else{
       labor=(data.labor||[]).slice(0,60);
-      mining=(data.mining||[]).slice(0,60);
       hr=(data.hr||[]).slice(0,60);
-      [...labor,...mining,...hr].forEach(i=>{if(!i.titleFr)i.titleFr=i.title||'';});
+      [...labor,...hr].forEach(i=>{if(!i.titleFr)i.titleFr=i.title||'';});
       const seen=new Set();
-      allItems=[...labor,...mining,...hr].filter(i=>{
+      allItems=[...labor,...hr].filter(i=>{
         if(!i.url||seen.has(i.url))return false;
         seen.add(i.url);
         return _newsRelevant(i,cfg.countries);
       });
     }
-    _newsResults={all:allItems,labor,mining,hr,fetchedAt:data.fetchedAt||new Date().toISOString()};
+    _newsResults={all:allItems,labor,hr,fetchedAt:data.fetchedAt||new Date().toISOString()};
     if(!allItems.length){
       const dbg=data.debug;
       const ok=dbg?dbg.filter(d=>d.count>0).length:0;
@@ -3989,6 +3991,12 @@ function newsSetTime(days){
 }
 function newsSetTab(tab){
   _newsTab=tab;
+  const b=document.getElementById('news-tab-bar-wrap');
+  if(b)b.innerHTML=_newsTabBarHtml();
+  renderNewsBody();
+}
+function newsSetCountryFilter(code){
+  _newsCountryFilter=code;
   const b=document.getElementById('news-tab-bar-wrap');
   if(b)b.innerHTML=_newsTabBarHtml();
   renderNewsBody();
